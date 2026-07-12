@@ -5,6 +5,7 @@ import ToolDirectory from "@/components/ToolDirectory"
 import { version } from "../../../package.json"
 import { version as siteVersion } from "../../package.json"
 import SiteFooter from "../components/SiteFooter"
+import PortsSection from "../components/PortsSection"
 import { MagnetChar } from "@liiift-studio/magnettype"
 
 export default function Home() {
@@ -205,6 +206,8 @@ const url = applyFontBlob('MyFont', fontToBlob(font))
 					</div>
 				</div>
 			</section>
+
+			<PortsSection figma="full" />
 
 			<SiteFooter current="glyphShaper" npmVersion={version} siteVersion={siteVersion} />
 
