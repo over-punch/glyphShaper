@@ -148,7 +148,7 @@ const url = applyFontBlob('MyFont', fontToBlob(font))
 									<th className="pb-2 font-normal">Description</th>
 								</tr>
 							</thead>
-							<tbody className="text-muted zebra-bleed">
+							<tbody className="text-muted zebra">
 								<tr className="hover:bg-foreground/5 transition-colors">
 									<td className="py-2 pr-6 font-mono">parseFont(buffer, decompressor?)</td>
 									<td className="py-2">Parse an ArrayBuffer (TTF, OTF, or WOFF1) into a GlyphFont handle. For WOFF2 input, pass a <code className="font-mono">woff2Decompressor</code> callback — the function throws without it.</td>
