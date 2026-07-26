@@ -86,7 +86,7 @@
   "homepage": "https://glyphshaper.com",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Liiift-Studio/glyphShaper.git"
+    "url": "git+https://github.com/Liiift-Studio/glyphShaper.git"
   },
   "bugs": {
     "url": "https://github.com/Liiift-Studio/glyphShaper/issues"
