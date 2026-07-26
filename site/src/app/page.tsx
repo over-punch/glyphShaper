@@ -148,44 +148,44 @@ const url = applyFontBlob('MyFont', fontToBlob(font))
 									<th className="pb-2 font-normal">Description</th>
 								</tr>
 							</thead>
-							<tbody className="text-muted">
-								<tr className="border-t border-foreground/10 hover:bg-foreground/5 transition-colors">
+							<tbody className="text-muted zebra-bleed">
+								<tr className="hover:bg-foreground/5 transition-colors">
 									<td className="py-2 pr-6 font-mono">parseFont(buffer, decompressor?)</td>
 									<td className="py-2">Parse an ArrayBuffer (TTF, OTF, or WOFF1) into a GlyphFont handle. For WOFF2 input, pass a <code className="font-mono">woff2Decompressor</code> callback — the function throws without it.</td>
 								</tr>
-								<tr className="border-t border-foreground/10 hover:bg-foreground/5 transition-colors">
+								<tr className="hover:bg-foreground/5 transition-colors">
 									<td className="py-2 pr-6 font-mono">getGlyphCommands(font, char)</td>
 									<td className="py-2">Return a deep copy of the path commands for a character.</td>
 								</tr>
-								<tr className="border-t border-foreground/10 hover:bg-foreground/5 transition-colors">
+								<tr className="hover:bg-foreground/5 transition-colors">
 									<td className="py-2 pr-6 font-mono">setGlyphCommands(font, char, cmds)</td>
 									<td className="py-2">Write modified commands back into the font object (mutates in place).</td>
 								</tr>
-								<tr className="border-t border-foreground/10 hover:bg-foreground/5 transition-colors">
+								<tr className="hover:bg-foreground/5 transition-colors">
 									<td className="py-2 pr-6 font-mono">fontToBlob(font)</td>
 									<td className="py-2">Serialise the font to a Blob (OTF binary).</td>
 								</tr>
-								<tr className="border-t border-foreground/10 hover:bg-foreground/5 transition-colors">
+								<tr className="hover:bg-foreground/5 transition-colors">
 									<td className="py-2 pr-6 font-mono">applyFontBlob(family, blob, existingUrl?, options?)</td>
 									<td className="py-2">Inject a @font-face override; returns the Blob URL for later cleanup. Pass <code className="font-mono">existingUrl</code> to revoke the previous Blob URL and prevent memory leaks. <code className="font-mono">options</code> accepts <code className="font-mono">fontWeight</code> and <code className="font-mono">fontStyle</code>.</td>
 								</tr>
-								<tr className="border-t border-foreground/10 hover:bg-foreground/5 transition-colors">
+								<tr className="hover:bg-foreground/5 transition-colors">
 									<td className="py-2 pr-6 font-mono">revokeFont(url)</td>
 									<td className="py-2">Revoke the Blob URL and remove the override style element.</td>
 								</tr>
-								<tr className="border-t border-foreground/10 hover:bg-foreground/5 transition-colors">
+								<tr className="hover:bg-foreground/5 transition-colors">
 									<td className="py-2 pr-6 font-mono">commandsToPathD(cmds)</td>
 									<td className="py-2">Convert a PathCommand[] to an SVG path <code className="font-mono">d</code> string for use in a <code className="font-mono">&lt;path&gt;</code> element.</td>
 								</tr>
-								<tr className="border-t border-foreground/10 hover:bg-foreground/5 transition-colors">
+								<tr className="hover:bg-foreground/5 transition-colors">
 									<td className="py-2 pr-6 font-mono">useGlyphFont(source)</td>
 									<td className="py-2">React hook — accepts a URL string, File, or <code className="font-mono">null</code> (resets to idle). Supports TTF, OTF, and WOFF1; for WOFF2 use <code className="font-mono">parseFont()</code> directly. Returns <code className="font-mono">{'{font, loading, error}'}</code>.</td>
 								</tr>
-								<tr className="border-t border-foreground/10 hover:bg-foreground/5 transition-colors">
+								<tr className="hover:bg-foreground/5 transition-colors">
 									<td className="py-2 pr-6 font-mono">GlyphShaperEditor</td>
 									<td className="py-2">Drop-in React component — handles font loading, glyph state, and bezier editing in a single wrapper. Accepts <code className="font-mono">font</code>, <code className="font-mono">fontFamily</code>, and <code className="font-mono">text</code>.</td>
 								</tr>
-								<tr className="border-t border-foreground/10 hover:bg-foreground/5 transition-colors">
+								<tr className="hover:bg-foreground/5 transition-colors">
 									<td className="py-2 pr-6 font-mono">GlyphSvgEditor</td>
 									<td className="py-2">Lower-level React component exposing just the SVG bezier editor. Use when you want to manage font loading and state yourself.</td>
 								</tr>
