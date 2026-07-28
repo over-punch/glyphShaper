@@ -234,7 +234,3 @@ If you are bundling for the browser and your bundler tries to resolve Node.js bu
 // next.config.ts / webpack config
 config.resolve.fallback = { ...config.resolve.fallback, fs: false, path: false }
 ```
-
----
-
-Current version: 1.0.12
