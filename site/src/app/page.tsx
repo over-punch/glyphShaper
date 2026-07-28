@@ -1,32 +1,23 @@
 import Demo from "@/components/Demo"
-import CopyInstall from "@/components/CopyInstall"
+import Hero from "@/components/Hero"
 import CodeBlock from "@/components/CodeBlock"
 import { version } from "../../../package.json"
 import { version as siteVersion } from "../../package.json"
 import SiteFooter from "../components/SiteFooter"
 import PortsSection from "../components/PortsSection"
-import { MagnetChar } from "@liiift-studio/magnettype"
 
 export default function Home() {
 	return (
 		<main className="flex flex-col items-center px-6 py-20 gap-24">
 
 			{/* Hero */}
-			<section className="w-full max-w-2xl lg:max-w-5xl flex flex-col gap-6">
-				<div className="flex flex-col gap-2">
-					<p className="text-xs uppercase tracking-[0.18em] font-medium text-muted">live glyph path editing</p>
-					<h1 className="text-4xl lg:text-8xl xl:text-9xl" style={{ fontFamily: "var(--font-merriweather), serif", fontVariationSettings: '"wght" 300, "opsz" 144', lineHeight: "1.05em" }}>
-						<MagnetChar as="span" minWeight={300} maxWeight={800} spreadRadius={220} fixedAxes={{ opsz: 144 }}>Edit a glyph.</MagnetChar><br />
-						<MagnetChar as="span" minWeight={300} maxWeight={800} spreadRadius={220} fixedAxes={{ opsz: 144 }} style={{ color: "var(--foreground-subtle)", fontStyle: "italic" }}>Watch it everywhere.</MagnetChar>
-					</h1>
-				</div>
-				<div className="flex flex-wrap items-center gap-4">
-					<CopyInstall />
-					<a href="https://github.com/Liiift-Studio/glyphShaper" target="_blank" rel="noopener noreferrer" aria-label="glyphShaper on GitHub (opens in new tab)" className="text-sm text-muted hover:text-foreground transition-colors">GitHub ↗</a>
-				</div>
-				<div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted tracking-wide">
-					<span>TypeScript</span><span aria-hidden="true">·</span><span>opentype.js</span><span aria-hidden="true">·</span><span>React + Vanilla JS</span><span aria-hidden="true">·</span><span>No server</span>
-				</div>
+			<Hero
+				eyebrow="live glyph path editing"
+				title={[{ text: "Edit a glyph." }, { text: "Watch it everywhere.", italic: true, subtle: true }]}
+				install="@liiift-studio/glyphshaper"
+				github="https://github.com/Liiift-Studio/glyphShaper"
+				tech={["TypeScript", "opentype.js", "React + Vanilla JS", "No server"]}
+			>
 				<p className="text-base leading-relaxed max-w-lg">
 					Click any character, drag its bezier control points to reshape the outline, then
 					hit Apply. glyphShaper regenerates the font binary in the browser and injects a
@@ -34,7 +25,7 @@ export default function Home() {
 					instance of that character on the page re-renders instantly. No server, no export,
 					no page reload.
 				</p>
-			</section>
+			</Hero>
 
 			{/* Demo */}
 			<section className="w-full max-w-2xl lg:max-w-5xl flex flex-col gap-4">
