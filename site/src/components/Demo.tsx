@@ -2,6 +2,7 @@
 
 // Interactive demo — loads Inter by default; file upload replaces it
 import { useState, useRef, useCallback, useEffect, useMemo, memo } from "react"
+import { useMediaQuery } from "@/lib/clientValue"
 import {
 	parseFont, applyFontBlob, fontToBlob,
 	getGlyphCommands, setGlyphCommands,
@@ -191,14 +192,7 @@ function Tooltip({
 	const [tab, setTab] = useState<"adjust" | "path">("adjust")
 
 	// ── Dark / light mode ──────────────────────────────────────────────────────
-	const [dark, setDark] = useState(true)
-	useEffect(() => {
-		const mq = window.matchMedia("(prefers-color-scheme: dark)")
-		setDark(mq.matches)
-		const onChange = (e: MediaQueryListEvent) => setDark(e.matches)
-		mq.addEventListener("change", onChange)
-		return () => mq.removeEventListener("change", onChange)
-	}, [])
+	const dark = useMediaQuery("(prefers-color-scheme: dark)", true)
 
 	// The editor is its own neutral surface (dark or light per OS preference) so glyphs stay legible
 	// for editing; only the ACCENT (tabs, anchors, primary action) carries the tool's teal hue.
@@ -478,7 +472,9 @@ const ClickableText = memo(function ClickableText({ text, selectedChar, onSelect
 export default function Demo() {
 	const [font, setFont]           = useState<GlyphFont | null>(null)
 	const [fileName, setFileName]   = useState<string>("")
-	const [loading, setLoading]     = useState(false)
+	// Starts true: the default font load kicks off on mount, so there is no frame
+	// where the editor is idle-and-not-loading.
+	const [loading, setLoading]     = useState(true)
 	const [loadStage, setLoadStage] = useState<LoadStage>(null)
 	const [loadPct, setLoadPct]     = useState(0)
 	const [error, setError]         = useState<string | null>(null)
@@ -500,13 +496,19 @@ export default function Demo() {
 	const origCmdsRef = useRef<Map<string, GlyphSnapshot>>(new Map())
 	const adjTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-	// Load bezier commands from snapshot whenever selection changes
+	// Load bezier commands from snapshot whenever selection changes.
+	// Kept in an effect deliberately: the source of truth is origCmdsRef.current, a mutable
+	// snapshot map populated at commit time. Deriving this during render instead would read a
+	// ref during render (react-hooks/refs) — a real bug — so the cascading-render warning is
+	// the correct trade here. The extra pass only runs when the selected glyph changes.
+	/* eslint-disable react-hooks/set-state-in-effect */
 	useEffect(() => {
 		if (!selectedChar) { setBezierCmds([]); setBezierHistory([]); return }
 		const snap = origCmdsRef.current.get(selectedChar)
 		setBezierCmds(snap ? snap.cmds.map(c => ({ ...c }) as PathCommand) : (font ? getGlyphCommands(font, selectedChar) : []))
 		setBezierHistory([])
 	}, [selectedChar, font])
+	/* eslint-enable react-hooks/set-state-in-effect */
 
 	function snapshotFont(f: GlyphFont) {
 		const snap = new Map<string, GlyphSnapshot>()
@@ -620,8 +622,6 @@ export default function Demo() {
 	useEffect(() => {
 		let cancelled = false
 		const abortController = new AbortController()
-		setLoading(true)
-		setLoadPct(0)
 
 		async function loadDefault() {
 			try {
