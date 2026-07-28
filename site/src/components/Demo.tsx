@@ -42,8 +42,7 @@ async function decompressWoff2(buffer: ArrayBuffer): Promise<ArrayBuffer> {
 }
 
 /** Loading stages shown in the progress bar */
-const LOAD_STAGES = ["Fetching font", "Parsing glyphs", "Applying to page"] as const
-type LoadStage = typeof LOAD_STAGES[number] | null
+type LoadStage = "Fetching font" | "Parsing glyphs" | "Applying to page" | null
 
 // ─── Adjustments ─────────────────────────────────────────────────────────────
 
