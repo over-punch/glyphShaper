@@ -14,7 +14,7 @@ export default function Home() {
 			<Hero
 				eyebrow="live glyph path editing"
 				title={[{ text: "Edit a glyph." }, { text: "Watch it everywhere.", italic: true, subtle: true }]}
-				install="@liiift-studio/glyphshaper"
+				install="@overpunch/glyphshaper"
 				github="https://github.com/Liiift-Studio/glyphShaper"
 				tech={["TypeScript", "opentype.js", "React + Vanilla JS", "No server"]}
 			>
@@ -83,7 +83,7 @@ export default function Home() {
 				<div className="flex flex-col gap-8 text-sm">
 					<div className="flex flex-col gap-3">
 						<p className="text-muted">Drop-in editor component</p>
-						<CodeBlock code={`import { useGlyphFont, GlyphShaperEditor } from '@liiift-studio/glyphshaper'
+						<CodeBlock code={`import { useGlyphFont, GlyphShaperEditor } from '@overpunch/glyphshaper'
 
 const { font } = useGlyphFont('/fonts/MyFont.ttf')
 
@@ -94,7 +94,7 @@ const { font } = useGlyphFont('/fonts/MyFont.ttf')
 					</div>
 					<div className="flex flex-col gap-3">
 						<p className="text-muted">Load from uploaded File</p>
-						<CodeBlock code={`import { useGlyphFont } from '@liiift-studio/glyphshaper'
+						<CodeBlock code={`import { useGlyphFont } from '@overpunch/glyphshaper'
 
 // Pass a File object from an <input type="file"> onChange handler
 // Note: useGlyphFont supports TTF, OTF, and WOFF1 only.
@@ -109,7 +109,7 @@ const { font } = useGlyphFont(null)`} />
 						<CodeBlock code={`import {
   parseFont, getGlyphCommands, setGlyphCommands,
   fontToBlob, applyFontBlob,
-} from '@liiift-studio/glyphshaper'
+} from '@overpunch/glyphshaper'
 
 const res    = await fetch('/fonts/MyFont.ttf')
 const buffer = await res.arrayBuffer()

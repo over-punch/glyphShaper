@@ -1,5 +1,5 @@
 {
-  "name": "@liiift-studio/glyphshaper",
+  "name": "@overpunch/glyphshaper",
   "version": "1.0.14",
   "description": "Interactive glyph path editor — click any character, reshape its bezier curves, and watch every instance on the page update instantly",
   "type": "module",

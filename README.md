@@ -1,6 +1,6 @@
 # Glyph Shaper
 
-[![npm](https://img.shields.io/npm/v/%40liiift-studio%2Fglyphshaper.svg)](https://www.npmjs.com/package/@liiift-studio/glyphshaper) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![part of liiift type-tools](https://img.shields.io/badge/liiift-type--tools-blueviolet)](https://github.com/Liiift-Studio/type-tools)
+[![npm](https://img.shields.io/npm/v/%40liiift-studio%2Fglyphshaper.svg)](https://www.npmjs.com/package/@overpunch/glyphshaper) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![part of liiift type-tools](https://img.shields.io/badge/liiift-type--tools-blueviolet)](https://github.com/Liiift-Studio/type-tools)
 
 CSS and JavaScript have no native way to reshape individual glyph outlines after the font loads. `glyphShaper` parses the font binary in the browser, lets you drag bezier control points to edit any character's outline, then regenerates the font and injects a `@font-face` override — every instance of that character on the page re-renders instantly, no page reload required.
 
@@ -8,7 +8,7 @@ CSS and JavaScript have no native way to reshape individual glyph outlines after
   <img src="https://raw.githubusercontent.com/Liiift-Studio/glyphShaper/main/assets/editor.png?v=1" width="420" alt="The glyphShaper bezier editor open on the letter 'g': every anchor point (filled circles) and bezier handle (outlined circles) of the glyph outline is draggable, with Adjust/Path tabs and an 'Apply to page' button." />
 </p>
 
-**[Try it live at glyphshaper.com →](https://glyphshaper.com)** · [npm](https://www.npmjs.com/package/@liiift-studio/glyphshaper) · [GitHub](https://github.com/Liiift-Studio/glyphShaper)
+**[Try it live at glyphshaper.com →](https://glyphshaper.com)** · [npm](https://www.npmjs.com/package/@overpunch/glyphshaper) · [GitHub](https://github.com/Liiift-Studio/glyphShaper)
 
 > **What you can build:** bespoke display lettering and logotypes, one-off headline cuts, reshaped terminals or swashes on a single hero letter — any per-glyph outline edit that propagates live to real page text. Drag points in the editor, or drive the lower-level functions to transform outlines programmatically.
 
@@ -19,7 +19,7 @@ TypeScript · React · Requires `opentype.js` (peer dep) · Optional: `wawoff2` 
 ## Install
 
 ```bash
-npm install @liiift-studio/glyphshaper opentype.js
+npm install @overpunch/glyphshaper opentype.js
 ```
 
 `opentype.js` is a required peer dependency and must be installed alongside this package.
@@ -46,7 +46,7 @@ The `GlyphShaperEditor` component handles font loading, character palette, the S
 
 ```tsx
 'use client'
-import { useGlyphFont, GlyphShaperEditor } from '@liiift-studio/glyphshaper'
+import { useGlyphFont, GlyphShaperEditor } from '@overpunch/glyphshaper'
 
 export default function MyPage() {
   const { font } = useGlyphFont('/fonts/MyFont.ttf')
@@ -73,7 +73,7 @@ Use `useGlyphFont` alone when you want to drive the lower-level functions direct
 
 ```tsx
 'use client'
-import { useGlyphFont, getGlyphCommands, setGlyphCommands, fontToBlob, applyFontBlob } from '@liiift-studio/glyphshaper'
+import { useGlyphFont, getGlyphCommands, setGlyphCommands, fontToBlob, applyFontBlob } from '@overpunch/glyphshaper'
 
 export default function MyEditor() {
   const { font, loading, error } = useGlyphFont('/fonts/MyFont.ttf')
@@ -93,7 +93,7 @@ export default function MyEditor() {
 ### Vanilla JS
 
 ```ts
-import { parseFont, getGlyphCommands, setGlyphCommands, fontToBlob, applyFontBlob } from '@liiift-studio/glyphshaper'
+import { parseFont, getGlyphCommands, setGlyphCommands, fontToBlob, applyFontBlob } from '@overpunch/glyphshaper'
 
 const res    = await fetch('/fonts/MyFont.ttf')
 const buffer = await res.arrayBuffer()
@@ -116,7 +116,7 @@ applyFontBlob('MyFont', blob)
 ### TypeScript
 
 ```ts
-import type { GlyphFont, PathCommand, GlyphShaperOptions, CmdM, CmdL, CmdC, CmdQ, CmdZ } from '@liiift-studio/glyphshaper'
+import type { GlyphFont, PathCommand, GlyphShaperOptions, CmdM, CmdL, CmdC, CmdQ, CmdZ } from '@overpunch/glyphshaper'
 
 const opts: GlyphShaperOptions = {
   fontWeight: 'bold',

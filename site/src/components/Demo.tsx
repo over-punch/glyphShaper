@@ -7,8 +7,8 @@ import {
 	parseFont, applyFontBlob, fontToBlob,
 	getGlyphCommands, setGlyphCommands,
 	GlyphSvgEditor,
-} from "@liiift-studio/glyphshaper"
-import type { GlyphFont, PathCommand } from "@liiift-studio/glyphshaper"
+} from "@overpunch/glyphshaper"
+import type { GlyphFont, PathCommand } from "@overpunch/glyphshaper"
 
 /** CSS font-family name used for the demo override rule */
 const DEMO_FAMILY = "GlyphShaperDemo"
