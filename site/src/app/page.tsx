@@ -15,7 +15,7 @@ export default function Home() {
 				eyebrow="live glyph path editing"
 				title={[{ text: "Edit a glyph." }, { text: "Watch it everywhere.", italic: true, subtle: true }]}
 				install="@overpunch/glyphshaper"
-				github="https://github.com/Liiift-Studio/glyphShaper"
+				github="https://github.com/over-punch/glyphShaper"
 				tech={["TypeScript", "opentype.js", "React + Vanilla JS", "No server"]}
 			>
 				<p className="text-base leading-relaxed max-w-lg">

@@ -86,10 +86,10 @@
   "homepage": "https://glyphshaper.com",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Liiift-Studio/glyphShaper.git"
+    "url": "git+https://github.com/over-punch/glyphShaper.git"
   },
   "bugs": {
-    "url": "https://github.com/Liiift-Studio/glyphShaper/issues"
+    "url": "https://github.com/over-punch/glyphShaper/issues"
   },
   "sideEffects": [
     "./dist/index.js",

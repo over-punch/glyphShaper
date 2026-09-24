@@ -1,14 +1,14 @@
 # Glyph Shaper
 
-[![npm](https://img.shields.io/npm/v/%40liiift-studio%2Fglyphshaper.svg)](https://www.npmjs.com/package/@overpunch/glyphshaper) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![part of liiift type-tools](https://img.shields.io/badge/liiift-type--tools-blueviolet)](https://github.com/Liiift-Studio/type-tools)
+[![npm](https://img.shields.io/npm/v/%40overpunch%2Fglyphshaper.svg)](https://www.npmjs.com/package/@overpunch/glyphshaper) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![part of liiift type-tools](https://img.shields.io/badge/liiift-type--tools-blueviolet)](https://github.com/over-punch/type-tools)
 
 CSS and JavaScript have no native way to reshape individual glyph outlines after the font loads. `glyphShaper` parses the font binary in the browser, lets you drag bezier control points to edit any character's outline, then regenerates the font and injects a `@font-face` override — every instance of that character on the page re-renders instantly, no page reload required.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Liiift-Studio/glyphShaper/main/assets/editor.png?v=1" width="420" alt="The glyphShaper bezier editor open on the letter 'g': every anchor point (filled circles) and bezier handle (outlined circles) of the glyph outline is draggable, with Adjust/Path tabs and an 'Apply to page' button." />
+  <img src="https://raw.githubusercontent.com/over-punch/glyphShaper/main/assets/editor.png?v=1" width="420" alt="The glyphShaper bezier editor open on the letter 'g': every anchor point (filled circles) and bezier handle (outlined circles) of the glyph outline is draggable, with Adjust/Path tabs and an 'Apply to page' button." />
 </p>
 
-**[Try it live at glyphshaper.com →](https://glyphshaper.com)** · [npm](https://www.npmjs.com/package/@overpunch/glyphshaper) · [GitHub](https://github.com/Liiift-Studio/glyphShaper)
+**[Try it live at glyphshaper.com →](https://glyphshaper.com)** · [npm](https://www.npmjs.com/package/@overpunch/glyphshaper) · [GitHub](https://github.com/over-punch/glyphShaper)
 
 > **What you can build:** bespoke display lettering and logotypes, one-off headline cuts, reshaped terminals or swashes on a single hero letter — any per-glyph outline edit that propagates live to real page text. Drag points in the editor, or drive the lower-level functions to transform outlines programmatically.
 
@@ -62,7 +62,7 @@ export default function MyPage() {
 The `fontFamily` prop must match the CSS `font-family` value already applied to your page text — this is what the `@font-face` override targets.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Liiift-Studio/glyphShaper/main/assets/hero.png?v=1" width="760" alt="The interactive demo: global width and shoulder sliders reshape every glyph at once, with the bezier editor open on one character — the editorial paragraphs below re-render live in the widened, reshaped font." />
+  <img src="https://raw.githubusercontent.com/over-punch/glyphShaper/main/assets/hero.png?v=1" width="760" alt="The interactive demo: global width and shoulder sliders reshape every glyph at once, with the bezier editor open on one character — the editorial paragraphs below re-render live in the widened, reshaped font." />
 </p>
 
 Edited glyphs live only for the page session — to keep one, pass the `Blob` from `fontToBlob(font)` to `URL.createObjectURL()` and offer it via an `<a download="edited.otf">`.

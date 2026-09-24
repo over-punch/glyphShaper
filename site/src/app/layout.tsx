@@ -43,7 +43,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
 	return (
 		<html lang="en" className={`h-full antialiased ${inter.variable}`}>
 			<body className="min-h-full flex flex-col">
-				<SiteHeader current="glyphShaper" githubUrl="https://github.com/Liiift-Studio/glyphShaper" />{children}</body>
+				<SiteHeader current="glyphShaper" githubUrl="https://github.com/over-punch/glyphShaper" />{children}</body>
 		</html>
 	)
 }
