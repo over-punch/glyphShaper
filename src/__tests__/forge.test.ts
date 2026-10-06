@@ -304,7 +304,7 @@ describe('applyFontBlob', () => {
 	it('appends a <style> element to document.head', () => {
 		const blob = new Blob([''], { type: 'font/opentype' })
 		applyFontBlob('TestFamily', blob)
-		const el = document.getElementById('glyphshaper-override')
+		const el = document.querySelector('style[data-glyphshaper-override="TestFamily"]')
 		expect(el).not.toBeNull()
 		expect(el?.tagName).toBe('STYLE')
 	})
@@ -312,7 +312,7 @@ describe('applyFontBlob', () => {
 	it('style contains the font-family name', () => {
 		const blob = new Blob([''], { type: 'font/opentype' })
 		applyFontBlob('MyFont', blob)
-		const el = document.getElementById('glyphshaper-override')!
+		const el = document.querySelector('style[data-glyphshaper-override="MyFont"]')!
 		expect(el.textContent).toContain('"MyFont"')
 	})
 
@@ -327,8 +327,22 @@ describe('applyFontBlob', () => {
 		const blob = new Blob([''], { type: 'font/opentype' })
 		applyFontBlob('MyFont', blob)
 		applyFontBlob('MyFont', blob)
-		const els = document.querySelectorAll('#glyphshaper-override')
+		const els = document.querySelectorAll('style[data-glyphshaper-override]')
 		expect(els.length).toBe(1)
+	})
+
+	it("keeps another family's override (one override per family)", () => {
+		const blob = new Blob([''], { type: 'font/opentype' })
+		applyFontBlob('FamilyA', blob)
+		applyFontBlob('FamilyB', blob)
+		expect(document.querySelectorAll('style[data-glyphshaper-override]').length).toBe(2)
+	})
+
+	it('escapes the family name the CSS way (quotes, backslashes, newlines)', () => {
+		const blob = new Blob([''], { type: 'font/opentype' })
+		applyFontBlob('a"b\\c\nd', blob)
+		const el = document.querySelector('style[data-glyphshaper-override]')!
+		expect(el.textContent).toContain('font-family: "a\\"b\\\\c\\a d";')
 	})
 
 	it('returns the newly created Blob URL', () => {
@@ -356,12 +370,15 @@ describe('revokeFont', () => {
 		expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:mock-1')
 	})
 
-	it('removes the <style> element from the document', () => {
-		const el = document.createElement('style')
-		el.id = 'glyphshaper-override'
-		document.head.appendChild(el)
-		revokeFont('blob:mock-1')
-		expect(document.getElementById('glyphshaper-override')).toBeNull()
+	it("removes the style that uses the URL and leaves other families' overrides", () => {
+		let n = 0
+		vi.stubGlobal('URL', { createObjectURL: () => `blob:mock-${++n}`, revokeObjectURL: vi.fn() })
+		const blob = new Blob([''], { type: 'font/opentype' })
+		const a = applyFontBlob('FamilyA', blob)
+		applyFontBlob('FamilyB', blob)
+		revokeFont(a)
+		const left = Array.from(document.querySelectorAll('style[data-glyphshaper-override]'), (e) => e.getAttribute('data-glyphshaper-override'))
+		expect(left).toEqual(['FamilyB'])
 	})
 })
 
@@ -384,5 +401,53 @@ describe('parseFont', () => {
 		const decompressor = vi.fn().mockResolvedValue(new ArrayBuffer(8))
 		await expect(parseFont(woff2Buf, decompressor)).rejects.toThrow()
 		expect(decompressor).toHaveBeenCalledWith(woff2Buf)
+	})
+})
+
+// ─── Review fixes (2026-10) ──────────────────────────────────────────────────
+
+describe('review fixes', () => {
+	afterEach(() => { vi.unstubAllGlobals() })
+
+	it('rejects coordinates that cannot be written into a font, leaving the glyph unchanged', () => {
+		const font = makeMockFont()
+		const before = getGlyphCommands(font, 'A')
+		for (const bad of [NaN, Infinity, 40000, '12' as unknown as number]) {
+			expect(() => setGlyphCommands(font, 'A', [{ type: 'M', x: bad, y: 0 }, { type: 'L', x: 10, y: 10 }])).toThrow()
+		}
+		expect(getGlyphCommands(font, 'A')).toEqual(before)
+	})
+
+	it('rejects paths with more than 10,000 commands', () => {
+		const font = makeMockFont()
+		const huge: PathCommand[] = Array.from({ length: 10001 }, (_, i) => ({ type: 'L', x: i % 100, y: 0 }))
+		expect(() => setGlyphCommands(font, 'A', huge)).toThrow(RangeError)
+	})
+
+	it('measures the advance from the outline, not from far-off control points', () => {
+		const font = makeMockFont([{ type: 'M', x: 0, y: 0 }, { type: 'L', x: 100, y: 0 }, { type: 'Z' }])
+		const glyph = font._font.glyphs.get(65) as unknown as { advanceWidth: number }
+		const rsb = glyph.advanceWidth - 100
+		// A curve from (100,0) back to (0,0) whose control points sit at x = 5000 bulges out to x ≈ 3775.
+		setGlyphCommands(font, 'A', [{ type: 'M', x: 0, y: 0 }, { type: 'L', x: 100, y: 0 }, { type: 'C', x1: 5000, y1: 100, x2: 5000, y2: 200, x: 0, y: 300 }, { type: 'Z' }])
+		expect(glyph.advanceWidth).toBeLessThan(5000 + rsb)
+		expect(glyph.advanceWidth).toBeGreaterThan(3700 + rsb)
+	})
+
+	it('a variable font override covers every weight by default; a static one uses its own weight', () => {
+		let n = 0
+		vi.stubGlobal('URL', { createObjectURL: () => `blob:v-${++n}`, revokeObjectURL: vi.fn() })
+		const make = (tables: object) => ({ _font: { toArrayBuffer: () => new ArrayBuffer(4), tables } } as unknown as GlyphFont)
+		applyFontBlob('Var', fontToBlob(make({ fvar: {}, os2: { usWeightClass: 400, fsSelection: 0 } })))
+		applyFontBlob('Bold', fontToBlob(make({ os2: { usWeightClass: 700, fsSelection: 1 } })))
+		const css = (f: string) => document.querySelector(`style[data-glyphshaper-override="${f}"]`)!.textContent!
+		expect(css('Var')).toContain('font-weight: 1 1000;')
+		expect(css('Bold')).toContain('font-weight: 700;')
+		expect(css('Bold')).toContain('font-style: italic;')
+	})
+
+	it('fontToBlob explains when opentype.js cannot write the font', () => {
+		const font = { _font: { toArrayBuffer: () => { throw new Error('boom') } } } as unknown as GlyphFont
+		expect(() => fontToBlob(font)).toThrow(/could not be written back/)
 	})
 })
