@@ -218,8 +218,8 @@ export declare function parseFont(buffer: ArrayBuffer, woff2Decompressor?: Woff2
 export declare type PathCommand = CmdM | CmdL | CmdC | CmdQ | CmdZ;
 
 /**
- * Revoke a previously created Blob URL and remove the override style element.
- * Call this when the editor is unmounted or the font is replaced.
+ * Revoke a previously created Blob URL and remove the override style that uses it (other families'
+ * overrides are left alone). Call this when the editor is unmounted or the font is replaced.
  *
  * @param url - Blob URL previously returned by applyFontBlob()
  */
@@ -228,7 +228,10 @@ export declare function revokeFont(url: string): void;
 /**
  * Write modified path commands back into the font's glyph.
  * This mutates the font object in place so the next call to fontToBlob()
- * regenerates with these commands applied.
+ * regenerates with these commands applied. The left side bearing and advance width follow the new
+ * outline (its real extent, keeping the original right side bearing). Throws a RangeError / TypeError
+ * for commands that can't be written into a font (non-numbers, coordinates beyond ±32767, more than
+ * 10,000 commands) — the font is left unchanged.
  *
  * @param font     - Parsed font handle (mutated in place)
  * @param char     - Character whose glyph to update
@@ -257,12 +260,13 @@ export declare function useGlyphFont(source: string | File | null): GlyphFontSta
  * Pass one to parseFont() when handling WOFF2 input — the library does not bundle
  * a decompressor itself to stay browser-safe.
  *
- * Example using wawoff2 in a Node.js / server context:
+ * Example using wawoff2 in a Node.js / server context (the result is a view into wawoff2's WebAssembly
+ * memory, so copy just its bytes — `result.buffer` alone is the whole heap, not the font):
  * ```ts
  * import { decompress } from 'wawoff2'
  * const decompressor: Woff2Decompressor = async (buf) => {
  *   const result = await decompress(new Uint8Array(buf))
- *   return result.buffer as ArrayBuffer
+ *   return result.slice().buffer
  * }
  * ```
  *
