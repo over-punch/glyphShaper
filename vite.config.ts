@@ -10,9 +10,9 @@ export default defineConfig({
 	],
 	build: {
 		lib: {
-			entry: 'src/index.ts',
+			entry: { index: 'src/index.ts', core: 'src/core.ts' },
 			formats: ['es', 'cjs'],
-			fileName: (format) => `index.${format === 'es' ? 'js' : 'cjs'}`,
+			fileName: (format, entryName) => `${entryName}.${format === 'es' ? 'js' : 'cjs'}`,
 		},
 		rollupOptions: {
 			external: ['react', 'react-dom', 'react/jsx-runtime', 'opentype.js', 'wawoff2'],

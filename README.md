@@ -22,9 +22,9 @@ TypeScript · React · Requires `opentype.js` (peer dep) · Optional: `wawoff2` 
 npm install @overpunch/glyphshaper opentype.js
 ```
 
-`opentype.js` is a required peer dependency and must be installed alongside this package.
+`opentype.js` must be installed alongside this package for `parseFont()` (it is marked optional in `package.json` only so it is loaded on demand, not at import). Without React, import from `@overpunch/glyphshaper/core`: the main entry also exports the React editor, so it imports `react`.
 
-`wawoff2` is an **optional** peer dependency needed only when working with WOFF2 fonts. Install it if you need to pass a WOFF2 buffer to `parseFont()`:
+`wawoff2` is an **optional** peer dependency for WOFF2 fonts. glyphShaper never imports it itself: you write the decompressor (see [`parseFont`](#parsefontbuffer-woff2decompressor)) and pass it to `parseFont()`. Install it if you'll do that:
 
 ```bash
 npm install wawoff2
@@ -38,7 +38,9 @@ npm install wawoff2
 
 > **Font format:** `glyphShaper` accepts TTF, OTF, WOFF1, and — with the optional `wawoff2` dep and a supplied decompressor — WOFF2. The font must be loaded from a URL accessible to `fetch()` (or supplied as a `File` object via `<input type="file">`). **WOFF2 needs a decompressor:** `useGlyphFont` cannot take one, so it throws on WOFF2 input — for WOFF2, call `parseFont(buffer, woff2Decompressor)` directly (see [`parseFont`](#parsefontbuffer-woff2decompressor) below).
 
-> **Variable fonts:** opentype.js re-serialises only the static outline, not the `gvar`/`fvar`/`avar`/`STAT` tables. After `applyFontBlob()`, the overridden family is a **static snapshot** — any CSS `font-variation-settings` on the page will no longer take effect for that family. `glyphShaper` logs a `console.warn` when it detects a variable font.
+> **Variable fonts:** opentype.js re-serialises only the static outline, not the `gvar`/`fvar`/`avar`/`STAT` tables. After `applyFontBlob()`, the overridden family is a **static snapshot** — the same outline at every weight, and CSS `font-variation-settings` no longer take effect for that family. `glyphShaper` logs a `console.warn` when it detects a variable font.
+
+> **What re-serialising drops (every Apply, even with no edits):** opentype.js can't write `GSUB`, `GPOS`, `kern` or `GDEF`, so the overridden family loses **kerning** and **ligatures** (in PT Serif, "AVAVAV To Ty WA" grew from 322 to 350px — exactly its width with kerning off). Hinting (`fpgm`, `prep`, `cvt `, `gasp`, `hdmx`, `LTSH`) is dropped too, and TrueType (`glyf`) outlines are written as CFF, so the file is often larger. Composite glyphs (e.g. Á built from A + accent) are flattened, so editing A doesn't change Á. Edit display text where this is acceptable, or keep the edited font to the characters you change.
 
 ### React component
 
@@ -155,22 +157,24 @@ Writes modified commands back into the font object in place. The change takes ef
 
 ### `fontToBlob(font)`
 
-Serialises the (possibly modified) font using opentype.js's `toArrayBuffer()` and wraps the bytes in a `Blob` (`font/opentype`), ready to pass to `applyFontBlob()`.
+Serialises the (possibly modified) font using opentype.js's `toArrayBuffer()` and wraps the bytes in a `Blob` (`font/opentype`), ready to pass to `applyFontBlob()`. Throws a clear error if opentype.js can't write the font. See "What re-serialising drops" above.
 
 ### `applyFontBlob(fontFamily, blob, previousUrl?, options?)`
 
-Injects a `@font-face` override rule targeting `fontFamily` with the supplied blob. Creates a Blob URL, appends a `<style>` tag to the document, and returns the Blob URL so it can be revoked later. If `previousUrl` is supplied it is revoked before the new rule is injected.
+Injects a `@font-face` override rule targeting `fontFamily` with the supplied blob. Creates a Blob URL, appends a `<style>` tag for that family (replacing that family's previous override only — editors for different families don't interfere), and returns the Blob URL so it can be revoked later. If `previousUrl` is supplied it is revoked before the new rule is injected.
+
+By default the rule copies the `font-weight` and `font-style` of the family's existing `@font-face` (an override only replaces a face whose descriptors match: a variable family declared `font-weight: 100 1000` otherwise keeps its original). Without one, it uses the font's own weight and style (every weight, `1 1000`, for a variable font). The family name is escaped as a CSS string.
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `fontFamily` | `string` | CSS font-family value to override |
 | `blob` | `Blob` | Font data from `fontToBlob()` |
 | `previousUrl` | `string \| undefined` | Blob URL from a previous call to revoke |
-| `options` | `GlyphShaperOptions \| undefined` | `fontWeight` and `fontStyle` for the `@font-face` descriptor |
+| `options` | `GlyphShaperOptions \| undefined` | `fontWeight` and `fontStyle` for the `@font-face` descriptor (default: see above) |
 
 ### `revokeFont(url)`
 
-Revokes a Blob URL returned by `applyFontBlob` and removes the corresponding `<style>` tag from the document.
+Revokes a Blob URL returned by `applyFontBlob` and removes the `<style>` tag that uses it (other families' overrides stay).
 
 ### `commandsToPathD(commands)`
 
@@ -199,13 +203,15 @@ Lower-level React component that exposes only the SVG bezier editor. Use this wh
 
 ## How it works
 
-**Font parsing:** `parseFont()` uses dynamic `import('opentype.js')` so the parser is only loaded when called. WOFF2 fonts are first decompressed with `import('wawoff2')` (WASM brotli decoder), then passed to opentype.js as raw bytes.
+**Font parsing:** `parseFont()` uses dynamic `import('opentype.js')` so the parser is only loaded when called. WOFF2 fonts are first decompressed by the `woff2Decompressor` you pass (e.g. one built on `wawoff2`, or a server route), then passed to opentype.js as raw bytes.
+
+**Editing:** `setGlyphCommands()` validates the path (numbers within ±32767, at most 10,000 commands) and throws a clear error otherwise, leaving the font unchanged; the left side bearing and advance width follow the outline's real extent (not its control points), keeping the right side bearing.
 
 **Path command model:** opentype.js exposes each glyph's outline as a flat array of path commands (`M`, `L`, `C`, `Q`, `Z`). `glyphShaper` deep-copies this array into React state so edits are non-destructive until the user clicks "Apply".
 
-**SVG editor:** The inline bezier editor renders the glyph outline in a fixed-coordinate SVG (`viewBox 0 0 360 360`). A `y-flip` transform reconciles glyph space (y-up) with SVG space (y-down). Pointer capture keeps drags active when the cursor leaves a control point circle. `getScreenCTM().inverse()` converts pointer events at any CSS scale back to viewBox coordinates.
+**SVG editor:** The inline bezier editor renders the glyph outline in a fixed-coordinate SVG (`viewBox 0 0 360 360`). A `y-flip` transform reconciles glyph space (y-up) with SVG space (y-down). Pointer capture keeps drags active when the cursor leaves a control point circle. Keyboard users can Tab to a point (labelled with its coordinates) and move it with the arrow keys (Shift for 10 units); focus moves into the editor when a character opens. `getScreenCTM().inverse()` converts pointer events at any CSS scale back to viewBox coordinates.
 
-**Undo:** Each drag operation pushes a pre-drag snapshot of the commands array onto a bounded history stack (max 50 entries). Undo restores the last snapshot. `Ctrl+Z` / `Cmd+Z` is handled via a `keydown` listener while the editor panel is open.
+**Undo:** Each drag operation pushes a pre-drag snapshot of the commands array onto a bounded history stack (max 50 entries). Undo restores the last snapshot. `Ctrl+Z` / `Cmd+Z` undoes while the editor panel is open, when focus is in the editor (it never takes undo away from inputs or editable content elsewhere on the page). If Apply fails (an invalid path, or a font opentype.js can't write), the editor stays open and shows why.
 
 **Font-face override:** After "Apply", `setGlyphCommands` writes the modified path back into the live opentype.js font object, `fontToBlob()` re-serialises the entire font to an `ArrayBuffer`, and `applyFontBlob()` creates a Blob URL and injects a late `@font-face` rule reusing the same family name. Because `@font-face` resolves by family name and source order (not selector specificity), the later rule wins, and every instance of the character on the page re-renders immediately without a reload.
 
@@ -224,8 +230,8 @@ Lower-level React component that exposes only the SVG bezier editor. Use this wh
 
 | Package | Required? | Purpose |
 |---------|-----------|---------|
-| `opentype.js` | Yes | Font parsing, glyph path access, and font serialisation |
-| `wawoff2` | Optional | WOFF2 decompression (WASM brotli) — only needed when passing a WOFF2 buffer to `parseFont()` |
+| `opentype.js` | Yes, for `parseFont()` | Font parsing, glyph path access, and font serialisation (loaded on demand) |
+| `wawoff2` | Optional | For your own WOFF2 decompressor — glyphShaper doesn't import it |
 | `react` / `react-dom` | Optional | Only needed for `GlyphShaperEditor`, `GlyphSvgEditor`, and `useGlyphFont` |
 
 If you are bundling for the browser and your bundler tries to resolve Node.js built-ins (`fs`, `path`) pulled in by `wawoff2`, stub them as empty modules. For webpack / Next.js:
