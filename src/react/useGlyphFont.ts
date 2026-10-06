@@ -72,12 +72,8 @@ export function useGlyphFont(source: string | File | null): GlyphFontState {
 
 		load()
 		return () => { cancelled = true }
-	// File objects don't have stable identity, so we use their name+size as a key.
-	// Primitive string URLs are compared by value automatically.
-	// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [
-		typeof source === 'string' ? source : source ? `${source.name}:${source.size}` : null,
-	])
+	// URLs compare by value, Files by identity (two different files can share a name and size).
+	}, [source])
 
 	return state
 }

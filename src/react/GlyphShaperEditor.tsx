@@ -145,10 +145,16 @@ function movePoint(
 	})
 }
 
-/** Collect unique printable characters from a string, preserving first-seen order. */
+type GraphemeSegmenter = { segment: (t: string) => Iterable<{ segment: string }> }
+const graphemeSegmenter: GraphemeSegmenter | null = typeof Intl !== 'undefined' && 'Segmenter' in Intl
+	? new (Intl as unknown as { Segmenter: new (l: undefined, o: { granularity: 'grapheme' }) => GraphemeSegmenter }).Segmenter(undefined, { granularity: 'grapheme' })
+	: null
+
+/** Collect unique printable characters (graphemes, so emoji stay whole) from a string, in first-seen order. */
 function uniquePrintableChars(text: string): string[] {
 	const seen = new Set<string>()
-	return text.split('').filter(c => {
+	const all = graphemeSegmenter ? Array.from(graphemeSegmenter.segment(text), (g) => g.segment) : Array.from(text)
+	return all.filter(c => {
 		if (!c.trim() || seen.has(c)) return false
 		seen.add(c)
 		return true
@@ -245,6 +251,17 @@ export function GlyphSvgEditor({
 		dragging.current = null
 	}
 
+	/** Arrow keys move the focused point by 1 font unit (10 with Shift); each key press is one undo step. */
+	function handlePointKeyDown(e: React.KeyboardEvent<SVGCircleElement>, cmdIdx: number, field: 'xy' | 'x1y1' | 'x2y2', x: number, y: number) {
+		const step = e.shiftKey ? 10 : 1
+		const delta: Record<string, [number, number]> = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, step], ArrowDown: [0, -step] }
+		const d = delta[e.key]
+		if (!d) return
+		e.preventDefault()
+		onDragStart(commands)
+		onChange(movePoint(commands, cmdIdx, field, x + d[0], y + d[1]))
+	}
+
 	const pathD      = commandsToPathD(commands)
 	const dragPoints = buildDragPoints(commands)
 	const handleLns  = buildHandleLines(commands)
@@ -264,7 +281,8 @@ export function GlyphSvgEditor({
 				// Maintain a 1:1 aspect ratio as width scales with the container
 				aspectRatio: '1 / 1',
 			}}
-			aria-label={`Glyph path editor for character ${char}`}
+			role="group"
+			aria-label={`Glyph path editor for character ${char}. Tab to a point, then use the arrow keys to move it (Shift for 10 units).`}
 		>
 			{/* Baseline guide */}
 			<line
@@ -319,8 +337,9 @@ export function GlyphSvgEditor({
 					<circle
 						key={i}
 						role="button"
-						aria-label={`${pt.kind === 'anchor' ? 'Anchor' : 'Handle'} point ${i + 1} of ${dragPoints.length}`}
+						aria-label={`${pt.kind === 'anchor' ? 'Anchor' : 'Handle'} point ${i + 1} of ${dragPoints.length}, x ${Math.round(pt.x)}, y ${Math.round(pt.y)}`}
 						tabIndex={0}
+						onKeyDown={(e) => handlePointKeyDown(e, pt.cmdIdx, pt.field, pt.x, pt.y)}
 						cx={cx} cy={cy} r={r}
 						fill={pt.kind === 'anchor' ? 'rgba(53,221,226,0.9)' : 'rgba(0,0,0,0)'}
 						stroke="rgba(53,221,226,0.75)"
@@ -436,6 +455,9 @@ export function GlyphShaperEditor({
 	/** Ref that stays in sync with editingChar without triggering effect deps */
 	const editingCharRef = useRef<string | null>(null)
 
+	const [applyError, setApplyError] = useState<string | null>(null)
+	/** The open editor panel — focus moves into it when a character is opened */
+	const panelRef = useRef<HTMLDivElement>(null)
 	const chars   = uniquePrintableChars(text)
 	const canUndo = history.length > 0
 
@@ -451,6 +473,26 @@ export function GlyphShaperEditor({
 
 	// Keep editingCharRef in sync
 	useEffect(() => { editingCharRef.current = editingChar }, [editingChar])
+
+	// A different font: close the open glyph (its path belongs to the old font).
+	const fontRef = useRef(font)
+	useEffect(() => {
+		if (fontRef.current === font) return
+		fontRef.current = font
+		if (editingCharRef.current !== null && selectedChar === undefined) {
+			setEditingChar(null)
+			setCommands([])
+			setHistory([])
+		} else if (editingCharRef.current !== null && font) {
+			setCommands(getGlyphCommands(font, editingCharRef.current))
+			setHistory([])
+		}
+	}, [font, selectedChar])
+
+	// Move focus into the editor when a character is opened (keyboard and screen-reader users).
+	useEffect(() => {
+		if (editingChar) panelRef.current?.querySelector<SVGElement>('circle')?.focus?.()
+	}, [editingChar])
 
 	// ─── Controlled mode: sync selectedChar prop → internal state ──────────────
 
@@ -499,10 +541,12 @@ export function GlyphShaperEditor({
 	useEffect(() => {
 		if (!editingChar) return
 		function onKeyDown(e: KeyboardEvent) {
-			// Do not intercept Ctrl+Z when focus is inside a text input or textarea —
-			// that would swallow native undo in form fields on the same page.
-			const tag = (e.target as HTMLElement | null)?.tagName
-			if (tag === 'INPUT' || tag === 'TEXTAREA') return
+			// Only undo glyph edits when focus is in the editor (or nowhere in particular): never swallow
+			// native undo in form fields or editable content elsewhere on the page.
+			const target = e.target as HTMLElement | null
+			const inEditor = !!target && !!panelRef.current?.contains(target)
+			const neutral = !target || target === document.body || target === document.documentElement
+			if (!inEditor && !neutral) return
 			if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key === 'z') {
 				e.preventDefault()
 				undoRef.current()
@@ -530,9 +574,17 @@ export function GlyphShaperEditor({
 
 	function handleApply() {
 		if (!font || !editingChar) return
-		setGlyphCommands(font, editingChar, commands)
-		const blob = fontToBlob(font)
-		const url  = applyFontBlob(fontFamily, blob, appliedUrlRef.current ?? undefined)
+		let url: string
+		try {
+			setGlyphCommands(font, editingChar, commands)
+			const blob = fontToBlob(font)
+			url = applyFontBlob(fontFamily, blob, appliedUrlRef.current ?? undefined)
+		} catch (err) {
+			// Keep the editor open and say why (an invalid path, or a font opentype.js can't write).
+			setApplyError(err instanceof Error ? err.message : String(err))
+			return
+		}
+		setApplyError(null)
 		appliedUrlRef.current = url
 		onApply?.(editingChar, [...commands])
 		setEditingChar(null)
@@ -589,6 +641,7 @@ export function GlyphShaperEditor({
 			{/* Inline bezier editor */}
 			{editingChar && font && (
 				<div
+					ref={panelRef}
 					style={{
 						marginTop: 16,
 						padding: 16,
@@ -660,6 +713,11 @@ export function GlyphShaperEditor({
 							Apply to page
 						</button>
 					</div>
+					{applyError && (
+						<p role="alert" style={{ marginTop: 8, fontSize: 12, fontFamily: 'sans-serif' }}>
+							{applyError}
+						</p>
+					)}
 				</div>
 			)}
 
