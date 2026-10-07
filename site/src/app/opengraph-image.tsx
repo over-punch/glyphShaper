@@ -34,7 +34,7 @@ export default async function Image() {
 						</svg>
 					</div>
 					<div style={{ fontSize: 76, color: '#eff7f7', lineHeight: 1.06, fontWeight: 300 }}>Edit a glyph.</div>
-					<div style={{ fontSize: 76, color: '#acc3c3', lineHeight: 1.06, fontWeight: 300 }}>Watch it everywhere.</div>
+					<div style={{ fontSize: 76, color: '#acc3c3', lineHeight: 1.06, fontWeight: 300 }}>Keep the font.</div>
 				</div>
 
 				{/* Footer */}

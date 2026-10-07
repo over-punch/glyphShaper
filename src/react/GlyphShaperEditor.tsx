@@ -125,8 +125,13 @@ function buildHandleLines(commands: PathCommand[]): HandleLine[] {
 /**
  * Return a new commands array with one control point moved to (newX, newY).
  * Rounds to integers to keep font unit values clean.
+ *
+ * Moving an anchor also moves the other anchors of the same contour that sit on exactly the same spot. A
+ * TrueType outline arrives with such welded points (a curve's end repeated by a zero-length line, and the
+ * contour's start repeated at its close): they are one point in the font, so they move as one. Moving only
+ * one of them would tear the outline open and add a point the font didn't have.
  */
-function movePoint(
+export function movePoint(
 	commands: PathCommand[],
 	cmdIdx: number,
 	field: 'xy' | 'x1y1' | 'x2y2',
@@ -135,8 +140,17 @@ function movePoint(
 ): PathCommand[] {
 	const rx = Math.round(newX)
 	const ry = Math.round(newY)
+	const target = commands[cmdIdx]
+	// The contour that holds the moved point: from its M up to its Z.
+	let start = cmdIdx, end = cmdIdx
+	while (start > 0 && commands[start].type !== 'M') start--
+	while (end < commands.length - 1 && commands[end].type !== 'Z') end++
+	const weld = field === 'xy' && target && target.type !== 'Z' ? { x: target.x, y: target.y } : null
 	return commands.map((cmd, i) => {
-		if (i !== cmdIdx) return cmd
+		if (i !== cmdIdx) {
+			if (weld && i >= start && i <= end && cmd.type !== 'Z' && cmd.x === weld.x && cmd.y === weld.y) return { ...cmd, x: rx, y: ry }
+			return cmd
+		}
 		if (field === 'xy' && (cmd.type === 'M' || cmd.type === 'L'))   return { ...cmd, x: rx, y: ry }
 		if (field === 'xy' && (cmd.type === 'C' || cmd.type === 'Q'))   return { ...cmd, x: rx, y: ry }
 		if (field === 'x1y1' && (cmd.type === 'C' || cmd.type === 'Q')) return { ...cmd, x1: rx, y1: ry }

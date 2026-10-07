@@ -12,8 +12,8 @@ export default function Home() {
 
 			{/* Hero */}
 			<Hero
-				eyebrow="live glyph path editing"
-				title={[{ text: "Edit a glyph." }, { text: "Watch it everywhere.", italic: true, subtle: true }]}
+				eyebrow="live glyph editing that leaves the rest alone"
+				title={[{ text: "Edit a glyph." }, { text: "Keep the font.", italic: true, subtle: true }]}
 				install="@overpunch/glyphshaper"
 				github="https://github.com/over-punch/glyphShaper"
 				tech={["TypeScript", "opentype.js", "React + Vanilla JS", "No server"]}

@@ -13,6 +13,7 @@ import {
 	decodeSimpleGlyph, encodeSimpleGlyph, clearGvarGlyphs, woffToSfnt,
 } from '../core/patch'
 import type { PathCommand } from '../core/types'
+import { movePoint } from '../react/GlyphShaperEditor'
 
 /** Read a font from the site's public folder (both are OFL; licences sit beside them). */
 function load(name: string): ArrayBuffer {
@@ -326,5 +327,34 @@ describe('patch write path: Roboto Flex (variable)', () => {
 		try { fontToBlob(font, { write: 'rebuild' }) } catch { /* same */ }
 		expect(warn).toHaveBeenCalledTimes(1)
 		warn.mockRestore()
+	})
+})
+
+describe('editor: moving a point of a TrueType outline', () => {
+	it('moves welded anchors together, so a variable glyph keeps its point structure and still varies', async () => {
+		const font = await parseFont(ROBOTO_FLEX)
+		const cmds = getGlyphCommands(font, 'V')
+		// The first curve or line end that another anchor of the same contour repeats.
+		const idx = cmds.findIndex((c, i) => c.type !== 'Z' && c.type !== 'M' && cmds.some((d, j) => j !== i && d.type !== 'Z' && d.x === c.x && d.y === c.y))
+		expect(idx).toBeGreaterThan(0)
+		const at = cmds[idx] as { x: number; y: number }
+		const moved = movePoint(cmds, idx, 'xy', at.x + 40, at.y + 25)
+		expect(moved.filter((c) => c.type !== 'Z' && c.x === at.x + 40 && c.y === at.y + 25).length).toBeGreaterThan(1)
+		setGlyphCommands(font, 'V', moved)
+		const info = getWriteInfo(fontToBlob(font))!
+		expect(info.editedGlyphs.length).toBe(1)
+		expect(info.frozenGlyphs).toEqual([])
+	})
+
+	it('leaves anchors of other contours alone, and moves a handle on its own', () => {
+		const cmds: PathCommand[] = [
+			{ type: 'M', x: 0, y: 0 }, { type: 'L', x: 10, y: 0 }, { type: 'Q', x1: 10, y1: 10, x: 0, y: 0 }, { type: 'Z' },
+			{ type: 'M', x: 0, y: 0 }, { type: 'L', x: 5, y: 5 }, { type: 'Z' },
+		]
+		const moved = movePoint(cmds, 0, 'xy', 3, 4)
+		expect(moved[0]).toEqual({ type: 'M', x: 3, y: 4 })
+		expect(moved[2]).toEqual({ type: 'Q', x1: 10, y1: 10, x: 3, y: 4 })
+		expect(moved[4]).toEqual({ type: 'M', x: 0, y: 0 })
+		expect(movePoint(cmds, 2, 'x1y1', 7, 7)[2]).toEqual({ type: 'Q', x1: 7, y1: 7, x: 0, y: 0 })
 	})
 })

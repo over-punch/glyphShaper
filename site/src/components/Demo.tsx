@@ -88,11 +88,16 @@ type Shaping = {
 	kernAV: number
 	/** True if "ffi" sets narrower with ligatures on than off */
 	ligature: boolean
+	/** How much narrower kerning makes the kerning specimen line at 100 CSS px (optical sizing off), in px */
+	kernGain: number
 }
 
+/** A letter the demo never edits (it isn't in the specimen lines or paragraphs): its pixels show whether a write touched glyphs you left alone */
+const UNTOUCHED_CHAR = "H"
+
 /**
- * Measure a family's A–V kerning and its ffi ligature with hidden probes. Resolves once the family has loaded.
- * Kerning is width("AV") − width("A") − width("V"), converted to font units.
+ * Measure a family's A–V kerning, its ffi ligature and the kerning line's width with hidden probes. Resolves
+ * once the family has loaded. Kerning is width("AV") − width("A") − width("V"), converted to font units.
  */
 async function measureShaping(family: string, unitsPerEm: number): Promise<Shaping | null> {
 	if (typeof document === "undefined") return null
@@ -110,8 +115,32 @@ async function measureShaping(family: string, unitsPerEm: number): Promise<Shapi
 	}
 	const kernPx = w("AV") - w("A") - w("V")
 	const ligature = w("ffi", "font-variant-ligatures:none") - w("ffi") > 0.5
+	const kernGain = Math.round(((w(SPEC_KERN, "font-kerning:none") - w(SPEC_KERN)) / PROBE_PX) * 1000) / 10
 	host.remove()
-	return { kernAV: Math.round((kernPx / PROBE_PX) * unitsPerEm), ligature }
+	return { kernAV: Math.round((kernPx / PROBE_PX) * unitsPerEm), ligature, kernGain }
+}
+
+/**
+ * Draw one letter in two families on a canvas (150 px) and count the pixels whose coverage differs.
+ * 0 means the two fonts rasterise that letter identically in this browser. Returns null without a canvas.
+ */
+async function glyphPixelDiff(familyA: string, familyB: string, ch: string): Promise<number | null> {
+	if (typeof document === "undefined") return null
+	try { await Promise.all([familyA, familyB].map((f) => document.fonts.load(`150px "${f}"`, ch))) } catch { return null }
+	const canvas = document.createElement("canvas")
+	canvas.width = 260; canvas.height = 220
+	const ctx = canvas.getContext("2d", { willReadFrequently: true })
+	if (!ctx) return null
+	const draw = (family: string) => {
+		ctx.clearRect(0, 0, canvas.width, canvas.height)
+		ctx.font = `150px "${family}"`
+		ctx.fillText(ch, 30, 170)
+		return ctx.getImageData(0, 0, canvas.width, canvas.height).data
+	}
+	const a = draw(familyA).slice(), b = draw(familyB)
+	let diff = 0
+	for (let i = 3; i < a.length; i += 4) if (a[i] !== b[i]) diff++
+	return diff
 }
 
 // ─── Adjustments ─────────────────────────────────────────────────────────────
@@ -153,11 +182,17 @@ function adjX(x: number, cx: number, width: number, leftSide: number, rightSide:
 	return nx
 }
 
+/**
+ * Reshape an outline with the slider adjustments. In a TrueType outline, a curve's end point that sits exactly
+ * midway between two control points isn't stored in the font: it is implied. Those ends are put back midway
+ * between the moved control points, so the reshaped glyph has the same points as the original (only moved),
+ * and a variable font's variation data still fits it.
+ */
 function applyTransform(cmds: PathCommand[], cx: number, adj: Adjustments): PathCommand[] {
 	const { width, leftSide, rightSide, shoulders } = adj
 	const tx = (x: number) => adjX(x, cx, width, leftSide, rightSide)
 	let px = 0, py = 0
-	return cmds.map(cmd => {
+	const out = cmds.map((cmd): PathCommand => {
 		if (cmd.type === "Z") return { type: "Z" }
 		if (cmd.type === "M") { const nx = tx(cmd.x); px = nx; py = cmd.y; return { type: "M", x: nx, y: cmd.y } }
 		if (cmd.type === "L") { const nx = tx(cmd.x); px = nx; py = cmd.y; return { type: "L", x: nx, y: cmd.y } }
@@ -179,6 +214,28 @@ function applyTransform(cmds: PathCommand[], cx: number, adj: Adjustments): Path
 		}
 		return cmd as PathCommand
 	})
+
+	// Put implied curve ends back midway between their (moved) control points, contour by contour.
+	let start = 0
+	for (let i = 0; i <= cmds.length; i++) {
+		if (i < cmds.length && cmds[i].type !== "Z") continue
+		const first = cmds[start]?.type === "M" ? start + 1 : start
+		const n = i - first
+		for (let k = 0; k < n; k++) {
+			const a = cmds[first + k], b = cmds[first + ((k + 1) % n)]
+			if (a.type !== "Q" || b.type !== "Q") continue
+			if (Math.abs(a.x - (a.x1 + b.x1) / 2) > 1e-6 || Math.abs(a.y - (a.y1 + b.y1) / 2) > 1e-6) continue
+			const oa = out[first + k], ob = out[first + ((k + 1) % n)]
+			if (oa.type !== "Q" || ob.type !== "Q") continue
+			oa.x = (oa.x1 + ob.x1) / 2
+			oa.y = (oa.y1 + ob.y1) / 2
+			// The contour's start is that same implied point when the curve that ends there is the last one.
+			const m = out[start]
+			if (k === n - 1 && m.type === "M") { m.x = oa.x; m.y = oa.y }
+		}
+		start = i + 1
+	}
+	return out
 }
 
 // ─── Slider sub-component ────────────────────────────────────────────────────
@@ -545,67 +602,101 @@ function timedWrite(f: GlyphFont, write: "patch" | "rebuild"): { blob: Blob; ms:
 
 // ─── Write report ─────────────────────────────────────────────────────────────
 
-/** One row of the "What this write kept" list: a label, the result, and whether it's good news */
-function ReportRow({ label, value, ok }: { label: string; value: string; ok: boolean | null }) {
+/** How a report row reads: good news, bad news, a caveat, or nothing to judge */
+type Mark = "yes" | "no" | "warn" | "na"
+
+/** The glyph shown beside each kind of mark */
+const MARK_GLYPH: Record<Mark, string> = { yes: "✓", no: "✕", warn: "!", na: "–" }
+
+/** One row of the "What this write kept" list: a label, the result, and how it reads */
+function ReportRow({ label, value, mark }: { label: string; value: string; mark: Mark }) {
 	return (
-		<div className="flex items-baseline justify-between gap-4 py-2 border-b border-foreground/10 last:border-b-0">
-			<dt className="text-xs uppercase tracking-[0.18em] text-muted shrink-0">{label}</dt>
-			<dd className="text-sm text-right font-mono tabular-nums" data-ok={ok === null ? "na" : ok ? "yes" : "no"}>
-				<span aria-hidden="true" style={{ marginRight: 8, opacity: ok === null ? 0.4 : 1 }}>{ok === null ? "–" : ok ? "✓" : "✕"}</span>
+		<div className="flex items-baseline justify-between gap-4 py-2 border-b border-foreground/10">
+			<dt className="text-xs uppercase tracking-[0.18em] text-muted min-w-0">{label}</dt>
+			<dd className="text-sm text-right font-mono tabular-nums shrink-0" data-mark={mark}>
+				<span aria-hidden="true" style={{ marginRight: 8, opacity: mark === "na" ? 0.4 : 1 }}>{MARK_GLYPH[mark]}</span>
 				{value}
 			</dd>
 		</div>
 	)
 }
 
-/** The panel that says what the last write did: glyphs rewritten, tables kept, kerning, ligatures, hinting, axes */
-function WriteReportPanel({ report, original, written }: { report: WriteReport; original: Shaping | null; written: Shaping | null }) {
+/** What each table a write can touch holds, in plain words */
+const TABLE_WORDS: Record<string, string> = {
+	glyf: "the outlines", loca: "the outlines’ index", hmtx: "letter widths", head: "the file header", hhea: "the widest-letter record",
+	maxp: "size limits", gvar: "variation data", DSIG: "a signature that no longer matches the edited file",
+	hdmx: "a per-size width cache, stale once a width changes", LTSH: "a per-size width cache, stale once a width changes",
+}
+
+/** "glyf (the outlines), loca (…)" for a list of table tags */
+function describeTables(tags: string[]): string {
+	return tags.map((t) => TABLE_WORDS[t] ? `${t.trim()} (${TABLE_WORDS[t]})` : t.trim()).join(", ")
+}
+
+/** The state of a group of tables after the write: every one identical, some changed, or gone */
+function groupState(t: NonNullable<WriteReport["tables"]>, tags: string[]): "none" | "identical" | "changed" | "removed" {
+	const had = tags.filter((x) => t.kept.includes(x) || t.changed.includes(x) || t.dropped.includes(x))
+	if (had.length === 0) return "none"
+	if (had.every((x) => t.kept.includes(x))) return "identical"
+	if (had.every((x) => t.dropped.includes(x))) return "removed"
+	return "changed"
+}
+
+/** The panel that says what the last write did: glyphs rewritten, kerning, ligatures, axes, an untouched letter, and the tables behind them */
+function WriteReportPanel({ report, original, written, untouchedDiff }: { report: WriteReport; original: Shaping | null; written: Shaping | null; untouchedDiff: number | null }) {
 	const t = report.tables
-	const present = t ? new Set([...t.kept, ...t.changed]) : null
-	const hintTables = ["fpgm", "prep", "cvt "]
-	const hadHinting = t ? hintTables.some((x) => t.kept.includes(x) || t.changed.includes(x) || t.dropped.includes(x)) : null
-	const hasHinting = present ? hintTables.some((x) => present.has(x)) : null
 	const n = (v: number) => v.toLocaleString("en-US")
+	const group = (tags: string[]): { value: string; mark: Mark } => {
+		if (!t) return { value: "not compared", mark: "na" }
+		const st = groupState(t, tags)
+		if (st === "none") return { value: "none in this font", mark: "na" }
+		if (st === "identical") return { value: "identical", mark: "yes" }
+		return { value: st === "removed" ? "removed" : "rewritten", mark: "no" }
+	}
+	const layout = group(["GSUB", "GPOS", "kern", "GDEF"])
+	const hinting = group(["fpgm", "prep", "cvt "])
+	const patch = report.method === "patch"
 	return (
 		<dl data-write-report={report.method} className="rounded-xl px-5 py-3" style={{ background: "var(--panel)" }}>
 			<ReportRow
 				label="Glyphs rewritten"
 				value={`${n(report.glyphsRewritten)} of ${n(report.glyphsTotal)}`}
-				ok={report.glyphsRewritten < report.glyphsTotal}
+				mark={report.glyphsRewritten < report.glyphsTotal ? "yes" : "no"}
 			/>
 			<ReportRow
-				label="Tables byte-identical"
-				value={t ? `${t.kept.length} of ${t.total}` : "not compared"}
-				ok={t ? t.kept.length >= t.total - 6 : null}
-			/>
-			<ReportRow
-				label="Kerning, A–V"
-				value={written && original ? `${written.kernAV} units (original ${original.kernAV})` : "measuring…"}
-				ok={written && original ? (original.kernAV === 0 ? null : written.kernAV === original.kernAV) : null}
+				label="Kerning, A–V, in font units"
+				value={written && original ? `${written.kernAV} (original ${original.kernAV})` : "measuring…"}
+				mark={written && original ? (original.kernAV === 0 ? "na" : written.kernAV === original.kernAV ? "yes" : "no") : "na"}
 			/>
 			<ReportRow
 				label="Ligature, ffi"
 				value={written && original ? (original.ligature ? (written.ligature ? "kept" : "lost") : "none in this font") : "measuring…"}
-				ok={written && original ? (original.ligature ? written.ligature : null) : null}
-			/>
-			<ReportRow
-				label="Hinting programs"
-				value={hadHinting === null ? "not compared" : hadHinting ? (hasHinting ? "kept" : "removed") : "none in this font"}
-				ok={hadHinting ? hasHinting : null}
+				mark={written && original ? (original.ligature ? (written.ligature ? "yes" : "no") : "na") : "na"}
 			/>
 			<ReportRow
 				label="Variable axes"
-				value={report.axes ? (report.axesKept ? `${report.axes} kept${report.frozen ? ` · ${report.frozen} edited glyph${report.frozen > 1 ? "s" : ""} frozen` : ""}` : `${report.axes} removed`) : "none in this font"}
-				ok={report.axes ? report.axesKept : null}
+				value={report.axes ? (report.axesKept ? (report.frozen ? `${report.axes} live · ${report.frozen} glyph${report.frozen > 1 ? "s" : ""} frozen` : `${report.axes} live`) : `${report.axes} removed`) : "none in this font"}
+				mark={report.axes ? (report.axesKept ? (report.frozen ? "warn" : "yes") : "no") : "na"}
 			/>
-			<ReportRow label="Write time" value={`${report.ms < 10 ? report.ms.toFixed(1) : Math.round(report.ms)} ms`} ok={null} />
+			<ReportRow
+				label={`Untouched letter, ${UNTOUCHED_CHAR}`}
+				value={untouchedDiff === null ? "measuring…" : untouchedDiff === 0 ? "pixel-identical" : `${n(untouchedDiff)} pixels differ`}
+				mark={untouchedDiff === null ? "na" : untouchedDiff === 0 ? "yes" : "no"}
+			/>
+			<ReportRow label="Kerning and ligature tables, byte for byte" value={layout.value} mark={layout.mark} />
+			<ReportRow label="Hinting programs, byte for byte" value={hinting.value} mark={hinting.mark} />
+			<ReportRow label="Write time" value={`${report.ms < 10 ? report.ms.toFixed(1) : Math.round(report.ms)} ms`} mark="na" />
 			{t && (
-				<p className="text-xs text-muted pt-3" style={{ lineHeight: 1.7 }}>
-					{t.changed.length > 0 && <>Rewritten: <span className="font-mono">{t.changed.join(" ")}</span>. </>}
-					{t.dropped.length > 0 && <>Removed: <span className="font-mono">{t.dropped.join(" ")}</span>. </>}
-					{t.added.length > 0 && <>Added: <span className="font-mono">{t.added.join(" ")}</span>. </>}
-					{t.changed.length === 0 && t.dropped.length === 0 && <>Nothing edited yet: the file is the original, byte for byte.</>}
-				</p>
+				<div data-write-notes="" className="text-xs text-muted pt-3 flex flex-col gap-2" style={{ lineHeight: 1.7 }}>
+					{t.changed.length === 0 && t.dropped.length === 0
+						? <p>Nothing edited yet: the file is the original, byte for byte.</p>
+						: <p>{t.kept.length} of {t.total} tables are byte-identical to the original.</p>}
+					{t.changed.length > 0 && <p>Rewritten: {describeTables(t.changed)}.</p>}
+					{t.dropped.length > 0 && <p>Removed: {describeTables(t.dropped)}.</p>}
+					{t.added.length > 0 && <p>Added: {describeTables(t.added)}.</p>}
+					{patch && report.glyphsRewritten > 0 && hinting.mark === "yes" && <p>The edited glyph loses its own hinting instructions; the font’s hinting programs and every other glyph’s instructions are as they were.</p>}
+					{patch && report.frozen > 0 && <p>Frozen: {report.frozen > 1 ? `${report.frozen} edited glyphs` : "one edited glyph"} no longer var{report.frozen > 1 ? "y" : "ies"}. The edit changed how many points the outline has or their order (or the glyph was assembled from other glyphs), so the font’s variation data for {report.frozen > 1 ? "those glyphs" : "that glyph"} no longer fits and was removed. {report.frozen > 1 ? "They keep" : "It keeps"} one shape at every weight; every other glyph still varies.</p>}
+				</div>
 			)}
 		</dl>
 	)
@@ -629,6 +720,8 @@ export default function Demo() {
 	const [report, setReport]       = useState<WriteReport | null>(null)
 	const [origShaping, setOrigShaping]       = useState<Shaping | null>(null)
 	const [writtenShaping, setWrittenShaping] = useState<Shaping | null>(null)
+	// Pixels of an untouched letter that differ between the original and the written font (null while measuring)
+	const [untouchedDiff, setUntouchedDiff] = useState<number | null>(null)
 	// Weight for variable fonts (font-variation-settings "wght"); null until a variable font is loaded
 	const [wght, setWght]           = useState<number | null>(null)
 	const [wghtRange, setWghtRange] = useState<{ min: number; max: number; def: number } | null>(null)
@@ -648,6 +741,8 @@ export default function Demo() {
 
 	const blobUrlRef  = useRef<string | null>(null)
 	const origCmdsRef = useRef<Map<string, GlyphSnapshot>>(new Map())
+	/** The outlines as the font shipped them, so Reset all can also undo path edits */
+	const pristineRef = useRef<Map<string, GlyphSnapshot>>(new Map())
 	const adjTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 	/** The original file's bytes (for the table comparison) and its FontFace (for the "original" row) */
 	const origBytesRef = useRef<ArrayBuffer | null>(null)
@@ -681,6 +776,7 @@ export default function Demo() {
 			snap.set(ch, { cmds, cx: computeCx(cmds) })
 		}
 		origCmdsRef.current = snap
+		pristineRef.current = new Map(snap)
 	}
 
 	/** Write the font with the chosen path, apply it to the page, and report what the write kept */
@@ -704,6 +800,7 @@ export default function Demo() {
 		}
 		setReport(base)
 		setWrittenShaping(null)
+		setUntouchedDiff(null)
 		const orig = origBytesRef.current
 		blob.arrayBuffer().then(async (bytes) => {
 			let tables: WriteReport["tables"] = null
@@ -714,7 +811,9 @@ export default function Demo() {
 				} catch { tables = null }
 			}
 			const shaping = await measureShaping(DEMO_FAMILY, ot.unitsPerEm ?? 1000)
+			const diff = origFaceRef.current ? await glyphPixelDiff(ORIGINAL_FAMILY, DEMO_FAMILY, UNTOUCHED_CHAR) : null
 			if (seq !== writeSeqRef.current) return
+			setUntouchedDiff(diff)
 			setReport({ ...base, tables, axesKept: tables ? [...tables.kept, ...tables.changed].includes("fvar") : base.axesKept })
 			setWrittenShaping(shaping)
 		})
@@ -754,6 +853,9 @@ export default function Demo() {
 	function resetGlobalAdj() {
 		setGlobalAdj(ADJ_ZERO)
 		setCharAdjs(new Map())
+		setSelectedChar(null)
+		setAnchorRect(null)
+		origCmdsRef.current = new Map(pristineRef.current)
 		if (adjTimerRef.current) clearTimeout(adjTimerRef.current)
 		if (font) applyAdjs(font, ADJ_ZERO, new Map())
 	}
@@ -1024,7 +1126,7 @@ export default function Demo() {
 										onClick={() => handleWriteMode(mode)}
 										title={mode === "patch"
 											? "Re-encode only the glyphs you edited and copy every other table byte-for-byte (the library's default for TrueType fonts)"
-											: "Re-create the whole file from opentype.js's object model, the way most browser font editors write"}
+											: "Re-create the whole file from opentype.js's object model (what glyphShaper did up to version 1.1.0)"}
 										className={`text-xs px-4 py-2 rounded-full border transition-colors ${(writeMode === mode && !disabled) || (mode === "rebuild" && !canPatch) ? "border-foreground/70 bg-foreground/10" : "border-foreground/30 hover:bg-foreground/5"} ${disabled ? "opacity-40 cursor-not-allowed" : ""}`}
 									>
 										{label}
@@ -1039,13 +1141,13 @@ export default function Demo() {
 					<div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,22rem)] mb-8">
 						<div className="flex flex-col gap-4 min-w-0 overflow-x-auto pb-1">
 							<div>
-								<p className="text-xs uppercase tracking-[0.18em] text-muted mb-1">Original file</p>
+								<p className="text-xs uppercase tracking-[0.18em] text-muted mb-1">Original file{origShaping && <span className="normal-case tracking-normal" data-line="original"> · kerning tightens the top line by {origShaping.kernGain.toFixed(1)} px (at 100 px)</span>}</p>
 								<p aria-hidden="true" data-spec="original" style={{ ...specStyle, fontFamily: ORIGINAL_FAMILY }} className="text-muted">
 									{SPEC_KERN}<br />{SPEC_LIGA}
 								</p>
 							</div>
 							<div>
-								<p className="text-xs uppercase tracking-[0.18em] text-muted mb-1">After the write</p>
+								<p className="text-xs uppercase tracking-[0.18em] text-muted mb-1">After the write{writtenShaping && <span className="normal-case tracking-normal" data-line="written"> · kerning tightens the top line by {writtenShaping.kernGain.toFixed(1)} px (at 100 px)</span>}</p>
 								{/* One text node per line, so the browser kerns and forms ligatures exactly as it would in running text */}
 								<p data-spec="written" style={{ ...specStyle, fontFamily: DEMO_FAMILY }}>
 									{SPEC_KERN}<br />{SPEC_LIGA}
@@ -1072,7 +1174,7 @@ export default function Demo() {
 						</div>
 						<div>
 							<p className="text-xs uppercase tracking-[0.18em] text-muted mb-2">What this write kept</p>
-							{report && <WriteReportPanel report={report} original={origShaping} written={writtenShaping} />}
+							{report && <WriteReportPanel report={report} original={origShaping} written={writtenShaping} untouchedDiff={untouchedDiff} />}
 						</div>
 					</div>
 
@@ -1118,7 +1220,7 @@ export default function Demo() {
 			{!loading && (
 				<p className="text-xs text-muted italic mt-6" style={{ lineHeight: "1.8" }}>
 					{font
-						? "Click any letter to reshape it, then switch the write path. Kerning and ligatures are measured in your browser after every write; the table counts compare the written file with the original, byte for byte."
+						? "Click any letter to reshape it, then switch the write path. Kerning, the ligature and the untouched letter are measured in your browser after every write; the table lines compare the written file with the original, byte for byte. Two limits of writing back one glyph: ligatures such as ffi are glyphs of their own, so an edited f doesn’t reach them, and the kerning that is kept is the original’s, made for the original shapes."
 						: "PT Serif loads by default — swap it for Roboto Flex or any TTF, OTF, WOFF, or WOFF2 above."
 					}
 				</p>
