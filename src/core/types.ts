@@ -1,4 +1,4 @@
-// glyphShaper/src/core/types.ts — path command types and options interface
+// glyphShaper/src/core/types.ts — path command types, write-path options and the override options interface
 
 /**
  * A moveto command — lifts the pen to an absolute position.
@@ -36,4 +36,31 @@ export interface GlyphShaperOptions {
 	fontWeight?: string
 	/** CSS font-style for the @font-face rule. Default: 'normal' */
 	fontStyle?: string
+}
+
+/**
+ * How fontToBlob writes the font:
+ * - 'patch': re-encode only the edited glyphs and copy every other table byte-for-byte (TrueType outlines only)
+ * - 'rebuild': re-create the whole file with opentype.js (CFF outlines; drops kerning, ligatures, hinting and variable data)
+ * - 'auto': patch when the font allows it, rebuild otherwise
+ */
+export type FontWriteMode = 'auto' | 'patch' | 'rebuild'
+
+/** Options for fontToBlob */
+export interface FontWriteOptions {
+	/** Which write path to use. Default: 'auto' */
+	write?: FontWriteMode
+}
+
+/** What fontToBlob did, from getWriteInfo(blob) */
+export interface FontWriteInfo {
+	/** The write path that ran */
+	method: 'patch' | 'rebuild'
+	/** Glyph ids whose outlines were edited */
+	editedGlyphs: number[]
+	/**
+	 * Patch path, variable fonts only: glyph ids whose edit added or removed points, so their own variation
+	 * data was removed. They keep one shape at every axis setting; every other glyph still varies.
+	 */
+	frozenGlyphs: number[]
 }

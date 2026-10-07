@@ -1,7 +1,9 @@
-// glyphShaper/src/core/forge.ts — font parsing, glyph extraction, and @font-face override
+// glyphShaper/src/core/forge.ts — font parsing, glyph extraction, the two write paths (patch the edited glyphs, or rebuild the file) and the @font-face override
 
 import type { Font as OpentypeFont } from 'opentype.js'
-import type { PathCommand, GlyphShaperOptions } from './types'
+import type { PathCommand, GlyphShaperOptions, FontWriteOptions, FontWriteInfo } from './types'
+import { readSfnt, canPatch, patchGlyphs, woffToSfnt } from './patch'
+import type { GlyphEdit } from './patch'
 
 // ─── Internal font handle ────────────────────────────────────────────────────
 
@@ -9,7 +11,17 @@ import type { PathCommand, GlyphShaperOptions } from './types'
  * Opaque wrapper around an opentype.js Font object.
  * Do not construct directly — use parseFont().
  */
-export type GlyphFont = { _font: OpentypeFont }
+export type GlyphFont = {
+	_font: OpentypeFont
+	/** The sfnt bytes the font was parsed from, kept when its outlines can be patched in place (TrueType) */
+	_source?: Uint8Array
+	/** Edited outlines by glyph id: what the patch write path re-encodes */
+	_edits?: Map<number, PathCommand[]>
+	/** Each edited glyph's outline and metrics as first read, to tell a real edit from a no-op */
+	_orig?: Map<number, { commands: PathCommand[]; advanceWidth: number | undefined; leftSideBearing: number | undefined }>
+	/** True once the "rebuilding a variable font" warning has been logged for this font */
+	_warned?: boolean
+}
 
 /** What applyFontBlob needs to know about the font a blob came from. */
 interface FontMeta {
@@ -19,6 +31,8 @@ interface FontMeta {
 	weight: number
 	/** OS/2 fsSelection italic bit */
 	italic: boolean
+	/** How the blob was written */
+	write: FontWriteInfo
 }
 
 /** Metadata per serialised blob (set by fontToBlob, read by applyFontBlob). */
@@ -120,22 +134,40 @@ export async function parseFont(buffer: ArrayBuffer, woff2Decompressor?: Woff2De
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	;(font as any).position = null
 
-	// Warn callers if this is a variable font — opentype.js toArrayBuffer() does not
-	// re-serialise gvar/fvar/avar/HVAR/MVAR/STAT, so the injected font is a static
-	// snapshot. Any CSS font-variation-settings on the page will have no effect after
-	// applyFontBlob() is called.
-	const isVariable = !!(t.fvar)
-	if (isVariable && typeof console !== 'undefined') {
-		console.warn(
-			'[glyphshaper] This font has variable-font axes (fvar table). ' +
-			'After applyFontBlob() the injected override is a static snapshot — ' +
-			'opentype.js does not re-serialise gvar/fvar/avar/HVAR/MVAR/STAT. ' +
-			'CSS font-variation-settings will have no effect on the overridden family.'
-		)
+	// Keep the original bytes when the outlines are TrueType: fontToBlob() then patches only the edited
+	// glyphs into them. A WOFF 1.0 file is unpacked first; a file that can't be read this way (CFF outlines,
+	// or no DecompressionStream for WOFF) is written by the rebuild path.
+	let source: Uint8Array | undefined
+	try {
+		const sfnt = isWoff(raw) ? await woffToSfnt(raw) : new Uint8Array(raw.slice(0))
+		if (sfnt && canPatch(readSfnt(sfnt))) source = sfnt
+	} catch {
+		source = undefined
 	}
 
-	return { _font: font }
+	return source ? { _font: font, _source: source } : { _font: font }
 }
+
+/** WOFF 1.0 magic bytes: "wOFF" at byte offset 0 */
+const WOFF_MAGIC = 0x774f4646
+
+/** Return true if the buffer starts with the WOFF 1.0 signature. */
+function isWoff(buffer: ArrayBuffer): boolean {
+	if (buffer.byteLength < 4) return false
+	return new DataView(buffer).getUint32(0, false) === WOFF_MAGIC
+}
+
+/** True if two outlines are the same commands with the same coordinates. */
+function sameCommands(a: PathCommand[], b: PathCommand[]): boolean {
+	if (a.length !== b.length) return false
+	for (let i = 0; i < a.length; i++) {
+		const p = a[i] as unknown as Record<string, unknown>, q = b[i] as unknown as Record<string, unknown>
+		if (p.type !== q.type) return false
+		for (const k of ['x', 'y', 'x1', 'y1', 'x2', 'y2']) if (p[k] !== q[k]) return false
+	}
+	return true
+}
+
 
 // ─── Glyph path access ────────────────────────────────────────────────────────
 
@@ -236,6 +268,28 @@ export function setGlyphCommands(font: GlyphFont, char: string, commands: PathCo
 	if (!glyph?.path) return
 	validateCommands(commands)
 
+	// Remember the glyph as first read. An edit that puts the original outline back is not an edit: the glyph
+	// leaves the edit list and gets its original metrics back, so the patch write path leaves its bytes alone.
+	const orig: NonNullable<GlyphFont['_orig']> = (font._orig ??= new Map())
+	if (!orig.has(idx)) {
+		orig.set(idx, {
+			commands: (glyph.path.commands as PathCommand[]).map((c: PathCommand) => ({ ...c })),
+			advanceWidth: glyph.advanceWidth,
+			leftSideBearing: glyph.leftSideBearing,
+		})
+	}
+	const first = orig.get(idx)!
+	const edits: NonNullable<GlyphFont['_edits']> = (font._edits ??= new Map())
+	if (sameCommands(commands, first.commands)) {
+		edits.delete(idx)
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		glyph.path.commands = first.commands.map((c: PathCommand) => ({ ...c })) as any
+		if (first.advanceWidth !== undefined) glyph.advanceWidth = first.advanceWidth
+		if (first.leftSideBearing !== undefined) glyph.leftSideBearing = first.leftSideBearing
+		return
+	}
+	edits.set(idx, commands.map((c) => ({ ...c })))
+
 	// Preserve the right-side bearing (whitespace cushion after the ink) before mutating the path.
 	// advanceWidth = path xMax + RSB, so RSB = advanceWidth - xMax.
 	const oldBounds = pathXBounds(glyph.path.commands as PathCommand[])
@@ -258,15 +312,63 @@ export function setGlyphCommands(font: GlyphFont, char: string, commands: PathCo
 // ─── Regenerate ───────────────────────────────────────────────────────────────
 
 /**
- * Serialise the (possibly edited) font back to a Blob.
- * The Blob contains a valid OTF/TTF binary and can be used to create a Blob URL.
+ * Serialise the (possibly edited) font back to a Blob, ready for applyFontBlob().
  *
- * @param font - Parsed (and optionally edited) font handle
+ * There are two write paths:
+ *
+ * - **patch** (the default for fonts with TrueType outlines): only the edited glyphs are re-encoded, and
+ *   every other table is copied byte-for-byte. Kerning, ligatures and other OpenType features, hinting
+ *   programs and variable-font axes are kept. With no edits the blob is the original file.
+ * - **rebuild** (fonts with CFF outlines, or on request): opentype.js re-creates the whole file from its
+ *   object model. The result has CFF outlines and no GSUB, GPOS or kern (ligatures, kerning), no hinting
+ *   and no variable-font tables.
+ *
+ * `write: 'auto'` (the default) patches when it can and rebuilds otherwise; `'patch'` throws when the
+ * font can't be patched; `'rebuild'` always rebuilds. Use getWriteInfo(blob) to see which path ran.
+ *
+ * @param font    - Parsed (and optionally edited) font handle
+ * @param options - Which write path to use
  */
-export function fontToBlob(font: GlyphFont): Blob {
-	// toArrayBuffer() is a public method on opentype.js Font objects; it is what font.download() calls
-	// internally. Note: it writes CFF outlines and leaves out GSUB/GPOS/kern (kerning, ligatures),
-	// hinting and variable-font tables.
+export function fontToBlob(font: GlyphFont, options: FontWriteOptions = {}): Blob {
+	const mode = options.write ?? 'auto'
+	if (mode !== 'auto' && mode !== 'patch' && mode !== 'rebuild') {
+		throw new TypeError(`[glyphshaper] write must be 'auto', 'patch' or 'rebuild'; got ${JSON.stringify(mode)}`)
+	}
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	const t = (font._font as any).tables
+	const meta = {
+		variable: !!t?.fvar,
+		weight: Number(t?.os2?.usWeightClass) || 400,
+		italic: !!((Number(t?.os2?.fsSelection) || 0) & 1),
+	}
+
+	if (mode !== 'rebuild') {
+		if (font._source) {
+			const edits = new Map<number, GlyphEdit>()
+			for (const [gid, commands] of font._edits ?? []) {
+				edits.set(gid, { commands, advanceWidth: font._font.glyphs.get(gid)?.advanceWidth })
+			}
+			const result = patchGlyphs(font._source, edits)
+			const blob = new Blob([result.bytes as BlobPart], { type: 'font/ttf' })
+			blobMeta.set(blob, { ...meta, write: { method: 'patch', editedGlyphs: result.edited, frozenGlyphs: result.frozen } })
+			return blob
+		}
+		if (mode === 'patch') {
+			throw new Error('[glyphshaper] this font can\'t be patched (it needs TrueType outlines, parsed by parseFont()); use write: \'rebuild\' or \'auto\'')
+		}
+	}
+
+	// Rebuild: toArrayBuffer() is a public method on opentype.js Font objects; it is what font.download() calls
+	// internally. It writes CFF outlines and leaves out GSUB/GPOS/kern (kerning, ligatures), hinting and
+	// variable-font tables.
+	if (meta.variable && !font._warned && typeof console !== 'undefined') {
+		font._warned = true
+		console.warn(
+			'[glyphshaper] Rebuilding a variable font: the result is a static snapshot ' +
+			'(opentype.js does not re-serialise gvar/fvar/avar/HVAR/MVAR/STAT). ' +
+			'CSS font-variation-settings will have no effect on the overridden family.'
+		)
+	}
 	let buffer: ArrayBuffer
 	try {
 		buffer = font._font.toArrayBuffer()
@@ -274,14 +376,30 @@ export function fontToBlob(font: GlyphFont): Blob {
 		throw new Error(`[glyphshaper] this font could not be written back (${err instanceof Error ? err.message : String(err)})`)
 	}
 	const blob = new Blob([buffer], { type: 'font/opentype' })
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	const t = (font._font as any).tables
-	blobMeta.set(blob, {
-		variable: !!t?.fvar,
-		weight: Number(t?.os2?.usWeightClass) || 400,
-		italic: !!((Number(t?.os2?.fsSelection) || 0) & 1),
-	})
+	blobMeta.set(blob, { ...meta, write: { method: 'rebuild', editedGlyphs: Array.from(font._edits?.keys() ?? []), frozenGlyphs: [] } })
 	return blob
+}
+
+/**
+ * How a blob from fontToBlob() was written: which path ran, which glyph ids were re-encoded, and which
+ * glyphs of a variable font lost their own variation data. Returns undefined for a blob fontToBlob() didn't make.
+ *
+ * @param blob - A blob returned by fontToBlob()
+ */
+export function getWriteInfo(blob: Blob): FontWriteInfo | undefined {
+	const info = blobMeta.get(blob)?.write
+	return info ? { method: info.method, editedGlyphs: [...info.editedGlyphs], frozenGlyphs: [...info.frozenGlyphs] } : undefined
+}
+
+/**
+ * The sfnt bytes a font was parsed from (a copy), or null when the font can't be patched in place (CFF
+ * outlines). Pair it with compareFontTables() to check what a write changed.
+ *
+ * @param font - Parsed font handle
+ */
+export function getFontSource(font: GlyphFont): ArrayBuffer | null {
+	if (!font._source) return null
+	return font._source.slice().buffer
 }
 
 // ─── Apply override ───────────────────────────────────────────────────────────
@@ -374,7 +492,7 @@ export function applyFontBlob(
 	el.textContent = [
 		`@font-face {`,
 		`  font-family: ${cssString(fontFamily)};`,
-		`  src: url(${cssString(url)}) format('opentype');`,
+		`  src: url(${cssString(url)}) format('${blob.type === 'font/ttf' ? 'truetype' : 'opentype'}');`,
 		`  font-weight: ${weight};`,
 		`  font-style: ${style};`,
 		`  font-display: swap;`,

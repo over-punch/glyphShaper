@@ -2,7 +2,7 @@
 
 [![npm](https://img.shields.io/npm/v/%40overpunch%2Fglyphshaper.svg)](https://www.npmjs.com/package/@overpunch/glyphshaper) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![part of liiift type-tools](https://img.shields.io/badge/liiift-type--tools-blueviolet)](https://github.com/over-punch/type-tools)
 
-CSS and JavaScript have no native way to reshape individual glyph outlines after the font loads. `glyphShaper` parses the font binary in the browser, lets you drag bezier control points to edit any character's outline, then regenerates the font and injects a `@font-face` override — every instance of that character on the page re-renders instantly, no page reload required.
+CSS and JavaScript have no native way to reshape individual glyph outlines after the font loads. `glyphShaper` parses the font binary in the browser, lets you drag bezier control points to edit any character's outline, then writes only that glyph back into the font (kerning, ligatures, hinting and variable axes stay as they were) and injects a `@font-face` override — every instance of that character on the page re-renders instantly, no page reload required.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/over-punch/glyphShaper/main/assets/editor.png?v=1" width="420" alt="The glyphShaper bezier editor open on the letter 'g': every anchor point (filled circles) and bezier handle (outlined circles) of the glyph outline is draggable, with Adjust/Path tabs and an 'Apply to page' button." />
@@ -40,7 +40,9 @@ npm install wawoff2
 
 > **Variable fonts:** opentype.js re-serialises only the static outline, not the `gvar`/`fvar`/`avar`/`STAT` tables. After `applyFontBlob()`, the overridden family is a **static snapshot** — the same outline at every weight, and CSS `font-variation-settings` no longer take effect for that family. `glyphShaper` logs a `console.warn` when it detects a variable font.
 
-> **What re-serialising drops (every Apply, even with no edits):** opentype.js can't write `GSUB`, `GPOS`, `kern` or `GDEF`, so the overridden family loses **kerning** and **ligatures** (in PT Serif, "AVAVAV To Ty WA" grew from 322 to 350px — exactly its width with kerning off). Hinting (`fpgm`, `prep`, `cvt `, `gasp`, `hdmx`, `LTSH`) is dropped too, and TrueType (`glyf`) outlines are written as CFF, so the file is often larger. Composite glyphs (e.g. Á built from A + accent) are flattened, so editing A doesn't change Á. Edit display text where this is acceptable, or keep the edited font to the characters you change.
+> **What a write keeps.** For fonts with TrueType outlines (`.ttf`, most `.woff` and `.woff2`), `fontToBlob()` re-encodes **only the glyphs you edited** and copies every other table byte-for-byte: `GSUB`, `GPOS` and `kern` (ligatures, kerning), `fpgm`, `prep` and `cvt ` (hinting), and `fvar`, `gvar`, `HVAR`, `avar` and `STAT` (variable axes). With no edits the blob is the original file. What changes: `glyf`, `loca` and the edited glyphs' `hmtx` entries; a `DSIG` signature is removed (it no longer matches), and `hdmx`/`LTSH` are removed if an advance width changed. The edited glyph loses its own TrueType instructions. In a variable font, an edit that only moves points keeps the glyph varying; an edit that adds or removes points removes that one glyph's variation data (`getWriteInfo(blob).frozenGlyphs`), and it keeps one shape at every axis setting. A cubic curve (`C`) written into a TrueType glyph becomes four quadratic curves.
+>
+> **Fonts with CFF outlines** (most `.otf`) are still rebuilt with opentype.js, which can't write `GSUB`, `GPOS`, `kern` or `GDEF`: the overridden family loses **kerning** and **ligatures** (rebuilt PT Serif sets "AVAVAV To Ty WA" at 874.3px instead of 804.5px at 100px in Chromium 149: its width with kerning off), hinting and variable axes, and composite glyphs are flattened. Pass `{ write: 'rebuild' }` to get this path on any font, or `{ write: 'patch' }` to throw instead of falling back.
 
 ### React component
 
@@ -155,9 +157,33 @@ Returns a deep copy of the path commands for `char` as a `PathCommand[]`. Return
 
 Writes modified commands back into the font object in place. The change takes effect on the next `fontToBlob()` call.
 
-### `fontToBlob(font)`
+### `fontToBlob(font, options?)`
 
-Serialises the (possibly modified) font using opentype.js's `toArrayBuffer()` and wraps the bytes in a `Blob` (`font/opentype`), ready to pass to `applyFontBlob()`. Throws a clear error if opentype.js can't write the font. See "What re-serialising drops" above.
+Writes the (possibly modified) font to a `Blob`, ready to pass to `applyFontBlob()`. See "What a write keeps" above.
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `write` | `'auto' \| 'patch' \| 'rebuild'` | `'auto'` | `'patch'`: re-encode only the edited glyphs and copy every other table (TrueType outlines; throws otherwise). `'rebuild'`: re-create the whole file with opentype.js's `toArrayBuffer()` (CFF outlines, no kerning, ligatures, hinting or axes). `'auto'`: patch when the font allows it, rebuild otherwise |
+
+The blob's type is `font/ttf` for a patched font and `font/opentype` for a rebuilt one. Throws a clear error if the font can't be written.
+
+### `getWriteInfo(blob)`
+
+Returns `{ method: 'patch' | 'rebuild', editedGlyphs: number[], frozenGlyphs: number[] }` for a blob from `fontToBlob()`: which path ran, which glyph ids were edited, and which glyphs of a variable font lost their own variation data.
+
+### `getFontSource(font)`
+
+Returns a copy of the sfnt bytes the font was parsed from (`ArrayBuffer`), or `null` when the font can't be patched (CFF outlines).
+
+### `compareFontTables(original, written)`
+
+Compares two TTF/OTF files table by table and returns `{ kept, changed, dropped, added }` (arrays of table tags; `kept` means byte-identical). Use it to check what a write did:
+
+```ts
+const blob = fontToBlob(font)
+const { kept, changed, dropped } = compareFontTables(getFontSource(font)!, await blob.arrayBuffer())
+// one glyph of PT Serif edited: kept 17 of 20 tables, changed ['glyf', 'loca'], dropped ['DSIG']
+```
 
 ### `applyFontBlob(fontFamily, blob, previousUrl?, options?)`
 
@@ -213,7 +239,9 @@ Lower-level React component that exposes only the SVG bezier editor. Use this wh
 
 **Undo:** Each drag operation pushes a pre-drag snapshot of the commands array onto a bounded history stack (max 50 entries). Undo restores the last snapshot. `Ctrl+Z` / `Cmd+Z` undoes while the editor panel is open, when focus is in the editor (it never takes undo away from inputs or editable content elsewhere on the page). If Apply fails (an invalid path, or a font opentype.js can't write), the editor stays open and shows why.
 
-**Font-face override:** After "Apply", `setGlyphCommands` writes the modified path back into the live opentype.js font object, `fontToBlob()` re-serialises the entire font to an `ArrayBuffer`, and `applyFontBlob()` creates a Blob URL and injects a late `@font-face` rule reusing the same family name. Because `@font-face` resolves by family name and source order (not selector specificity), the later rule wins, and every instance of the character on the page re-renders immediately without a reload.
+**Writing back:** `parseFont()` keeps the original file's bytes. `fontToBlob()` splits them into tables, re-encodes the edited glyphs as TrueType outlines, rebuilds `glyf` and `loca` around the untouched glyphs' original bytes, updates the edited glyphs' `hmtx` entries and the table checksums, and copies every other table as it was. When an edit only moves points, the glyph keeps its original point numbering, so a variable font's deltas still apply to it.
+
+**Font-face override:** After "Apply", `setGlyphCommands` records the modified path, `fontToBlob()` writes the font, and `applyFontBlob()` creates a Blob URL and injects a late `@font-face` rule reusing the same family name. Because `@font-face` resolves by family name and source order (not selector specificity), the later rule wins, and every instance of the character on the page re-renders immediately without a reload.
 
 ---
 
