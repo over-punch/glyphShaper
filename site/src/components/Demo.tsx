@@ -699,8 +699,9 @@ function WriteReportPanel({ report, original, written, untouchedDiff }: { report
 					{t.dropped.length > 0 && <p>Removed: {describeTables(t.dropped)}.</p>}
 					{t.added.length > 0 && <p>Added: {describeTables(t.added)}.</p>}
 					{patch && report.dependents > 0 && <p>{report.dependents} other glyph{report.dependents > 1 ? "s are" : " is"} built from {report.glyphsRewritten > 1 ? "the edited glyphs" : "the edited glyph"} (accented letters such as ö from o). {report.dependents > 1 ? "They aren’t" : "It isn’t"} rewritten, but {report.dependents > 1 ? "they show" : "it shows"} the new shape and follow{report.dependents > 1 ? "" : "s"} its new width; accents stay where they were.</p>}
+					{patch && report.glyphsRewritten > 0 && <p>The kerning{report.axes ? ", ligatures and variation data" : " and ligatures"} that are kept were made for the original shape of what you edited: a much wider letter can crowd its neighbours.</p>}
 					{patch && report.glyphsRewritten > 0 && hinting.mark === "yes" && <p>The edited glyph loses its own hinting instructions; the font’s hinting programs and every other glyph’s instructions are as they were.</p>}
-					{patch && report.frozen > 0 && <p>Frozen: {report.frozen > 1 ? `${report.frozen} edited glyphs` : "one edited glyph"} no longer var{report.frozen > 1 ? "y" : "ies"}. The edit changed the outline’s point structure (a point added or removed, a point the font only implied moved on its own, or a glyph assembled from other glyphs), so the font’s variation data for {report.frozen > 1 ? "those glyphs" : "that glyph"} no longer fits and was removed. {report.frozen > 1 ? "They keep" : "It keeps"} one shape at every weight; every other glyph still varies.</p>}
+					{patch && report.frozen > 0 && <p>Frozen: {report.frozen > 1 ? `${report.frozen} edited glyphs` : "one edited glyph"} no longer var{report.frozen > 1 ? "y" : "ies"}. The edit added or removed a point of the outline (or the glyph was assembled from other glyphs), so the font’s variation data for {report.frozen > 1 ? "those glyphs" : "that glyph"} no longer fits and was removed. {report.frozen > 1 ? "They keep" : "It keeps"} one shape at every weight; every other glyph still varies.</p>}
 				</div>
 			)}
 		</dl>
@@ -1126,13 +1127,13 @@ export default function Demo() {
 					<div className="flex flex-wrap items-center gap-3 mb-5">
 						<p id="write-path-label" className="text-xs uppercase tracking-[0.18em] font-medium text-muted">When you edit, write back</p>
 						<div role="radiogroup" aria-labelledby="write-path-label" className="flex flex-wrap gap-2">
-							{([["patch", "Only the edited glyph"], ["rebuild", "The whole font, rebuilt"]] as const).map(([mode, label]) => {
+							{([["patch", "Only the edited glyph"], ["rebuild", "The whole font, rebuilt with opentype.js"]] as const).map(([mode, label]) => {
 								const disabled = mode === "patch" && !canPatch
 								return (
 									<button
 										key={mode}
 										role="radio"
-										aria-checked={writeMode === mode && !disabled}
+										aria-checked={(writeMode === mode && !disabled) || (mode === "rebuild" && !canPatch)}
 										data-write-mode={mode}
 										disabled={disabled}
 										onClick={() => handleWriteMode(mode)}

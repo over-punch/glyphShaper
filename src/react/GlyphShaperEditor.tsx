@@ -126,10 +126,16 @@ function buildHandleLines(commands: PathCommand[]): HandleLine[] {
  * Return a new commands array with one control point moved to (newX, newY).
  * Rounds to integers to keep font unit values clean.
  *
- * Moving an anchor also moves the other anchors of the same contour that sit on exactly the same spot. A
- * TrueType outline arrives with such welded points (a curve's end repeated by a zero-length line, and the
- * contour's start repeated at its close): they are one point in the font, so they move as one. Moving only
- * one of them would tear the outline open and add a point the font didn't have.
+ * The move keeps the outline's point structure, so the font's own points only move (none is added):
+ *
+ * - **Welded anchors move together.** A TrueType outline arrives with a curve's end repeated by a zero-length
+ *   line, and the contour's start repeated at its close. They are one point in the font.
+ * - **Implied anchors follow their handles.** Where two quadratic curves meet smoothly, TrueType doesn't store
+ *   the meeting point: it is implied, midway between the two handles. Dragging a handle moves that point to
+ *   the new midpoint. Dragging the implied point itself moves both of its handles with it.
+ *
+ * Without this, one drag would turn an implied point into a stored one. In a variable font that changes the
+ * glyph's point numbering, and its variation data no longer fits.
  */
 export function movePoint(
 	commands: PathCommand[],
@@ -141,22 +147,63 @@ export function movePoint(
 	const rx = Math.round(newX)
 	const ry = Math.round(newY)
 	const target = commands[cmdIdx]
+	if (!target || target.type === 'Z') return commands
 	// The contour that holds the moved point: from its M up to its Z.
 	let start = cmdIdx, end = cmdIdx
 	while (start > 0 && commands[start].type !== 'M') start--
 	while (end < commands.length - 1 && commands[end].type !== 'Z') end++
-	const weld = field === 'xy' && target && target.type !== 'Z' ? { x: target.x, y: target.y } : null
-	return commands.map((cmd, i) => {
-		if (i !== cmdIdx) {
-			if (weld && i >= start && i <= end && cmd.type !== 'Z' && cmd.x === weld.x && cmd.y === weld.y) return { ...cmd, x: rx, y: ry }
-			return cmd
+	const first = commands[start].type === 'M' ? start + 1 : start
+	const last = commands[end].type === 'Z' ? end - 1 : end
+	const n = last - first + 1
+	const out = commands.map((c) => ({ ...c })) as PathCommand[]
+	/** The segment after segment i in this contour (wrapping round). */
+	const next = (i: number) => first + ((i - first + 1) % n)
+	/** True if segment i ends on an implied point: midway between its own handle and the next segment's. */
+	const implied = (i: number): boolean => {
+		const a = commands[i], b = n > 1 ? commands[next(i)] : null
+		if (!a || !b || a.type !== 'Q' || b.type !== 'Q') return false
+		return Math.abs(a.x - (a.x1 + b.x1) / 2) < 1e-6 && Math.abs(a.y - (a.y1 + b.y1) / 2) < 1e-6
+	}
+	const flags: boolean[] = []
+	for (let i = first; i <= last; i++) flags[i] = cmdIdx >= first && n > 0 ? implied(i) : false
+	const m = commands[start]
+	const lastSeg = commands[last]
+	// The contour's start is welded to its closing point when they coincide.
+	const startWelded = m.type === 'M' && lastSeg && lastSeg.type !== 'Z' && last >= first && m.x === lastSeg.x && m.y === lastSeg.y
+
+	if (field === 'xy' && cmdIdx >= first && flags[cmdIdx]) {
+		// An implied anchor: carry its two handles along, by a whole number of units.
+		const a = out[cmdIdx] as Extract<PathCommand, { type: 'Q' }>
+		const b = out[next(cmdIdx)] as Extract<PathCommand, { type: 'Q' }>
+		const dx = Math.round(newX - a.x), dy = Math.round(newY - a.y)
+		a.x1 += dx; a.y1 += dy
+		if (b !== a) { b.x1 += dx; b.y1 += dy }
+	} else if (field === 'xy') {
+		// A stored anchor: move it and every anchor of this contour welded to it.
+		const wx = target.x, wy = target.y
+		for (let i = start; i <= end; i++) {
+			const c = out[i]
+			if (c.type !== 'Z' && (i === cmdIdx || (c.x === wx && c.y === wy))) { c.x = rx; c.y = ry }
 		}
-		if (field === 'xy' && (cmd.type === 'M' || cmd.type === 'L'))   return { ...cmd, x: rx, y: ry }
-		if (field === 'xy' && (cmd.type === 'C' || cmd.type === 'Q'))   return { ...cmd, x: rx, y: ry }
-		if (field === 'x1y1' && (cmd.type === 'C' || cmd.type === 'Q')) return { ...cmd, x1: rx, y1: ry }
-		if (field === 'x2y2' && cmd.type === 'C')                        return { ...cmd, x2: rx, y2: ry }
-		return cmd
-	})
+	} else {
+		const c = out[cmdIdx]
+		if (field === 'x1y1' && (c.type === 'C' || c.type === 'Q')) { c.x1 = rx; c.y1 = ry }
+		if (field === 'x2y2' && c.type === 'C') { c.x2 = rx; c.y2 = ry }
+	}
+
+	// Put every implied anchor back midway between its (possibly moved) handles.
+	for (let i = first; i <= last; i++) {
+		if (!flags[i]) continue
+		const a = out[i] as Extract<PathCommand, { type: 'Q' }>
+		const b = out[next(i)] as Extract<PathCommand, { type: 'Q' }>
+		a.x = (a.x1 + b.x1) / 2
+		a.y = (a.y1 + b.y1) / 2
+	}
+	if (startWelded && flags[last]) {
+		const mm = out[start], l = out[last]
+		if (mm.type === 'M' && l.type !== 'Z') { mm.x = l.x; mm.y = l.y }
+	}
+	return out
 }
 
 type GraphemeSegmenter = { segment: (t: string) => Iterable<{ segment: string }> }

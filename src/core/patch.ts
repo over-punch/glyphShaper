@@ -459,6 +459,61 @@ function alignContours(explicit: GlyphPoint[][], original: GlyphPoint[][]): Glyp
 }
 
 /**
+ * Map edited path commands straight back onto the original glyph's points. opentype.js turns a TrueType
+ * contour into commands in a fixed way (a start, then a line for each on-curve point and a curve for each
+ * off-curve point, with implied points filled in), so when the edited commands have that same shape, each
+ * original point can be read back from them. This keeps points the simpler comparison would lose, such as
+ * two stored points on the same spot. Returns null when the commands have a different shape, when copies of
+ * one point disagree, or when an implied point is no longer midway between its neighbours.
+ */
+function alignByStructure(commands: PathCommand[], original: GlyphPoint[][]): GlyphPoint[][] | null {
+	// Split the commands into contours (M … Z).
+	const parts: PathCommand[][] = []
+	let cur: PathCommand[] | null = null
+	for (const c of commands) {
+		if (c.type === 'M') { if (cur) return null; cur = [c] }
+		else if (!cur) return null
+		else if (c.type === 'Z') { parts.push(cur); cur = null }
+		else cur.push(c)
+	}
+	if (cur || parts.length !== original.length) return null
+	const out: GlyphPoint[][] = []
+	for (let k = 0; k < parts.length; k++) {
+		const o = original[k], part = parts[k], n = o.length
+		if (n < 2 || part.length !== n + 1) return null
+		const found: ({ x: number; y: number } | null)[] = new Array(n).fill(null)
+		/** Record a coordinate for original point i; false if an earlier copy of it disagrees. */
+		const put = (i: number, x: number, y: number): boolean => {
+			const f = found[i]
+			if (!f) { found[i] = { x, y }; return true }
+			return same(f.x, f.y, x, y)
+		}
+		const impliedSlots: { a: number; b: number; x: number; y: number }[] = []
+		const m = part[0] as Extract<PathCommand, { type: 'M' }>
+		if (o[n - 1].on) { if (!put(n - 1, m.x, m.y)) return null }
+		else if (o[0].on) { if (!put(0, m.x, m.y)) return null }
+		else impliedSlots.push({ a: n - 1, b: 0, x: m.x, y: m.y })
+		for (let i = 0; i < n; i++) {
+			const c = part[i + 1], nextI = (i + 1) % n
+			if (o[i].on) {
+				if (c.type !== 'L' || !put(i, c.x, c.y)) return null
+			} else {
+				if (c.type !== 'Q' || !put(i, c.x1, c.y1)) return null
+				if (o[nextI].on) { if (!put(nextI, c.x, c.y)) return null }
+				else impliedSlots.push({ a: i, b: nextI, x: c.x, y: c.y })
+			}
+		}
+		if (found.some((f) => !f)) return null
+		for (const s of impliedSlots) {
+			const mx = (Math.round(found[s.a]!.x) + Math.round(found[s.b]!.x)) / 2, my = (Math.round(found[s.a]!.y) + Math.round(found[s.b]!.y)) / 2
+			if (Math.abs(s.x - mx) > IMPLIED_TOLERANCE || Math.abs(s.y - my) > IMPLIED_TOLERANCE) return null
+		}
+		out.push(o.map((q, i) => ({ x: found[i]!.x, y: found[i]!.y, on: q.on })))
+	}
+	return out
+}
+
+/**
  * Turn edited path commands into the contours to write. When the edit only moved points, the result keeps
  * the original glyph's point numbering (`preserved: true`), which is what a variable font's variation data
  * and any point-matched composites index by.
@@ -467,6 +522,10 @@ function alignContours(explicit: GlyphPoint[][], original: GlyphPoint[][]): Glyp
  * @param original - The glyph's contours before the edit (null for an empty or composite glyph)
  */
 export function contoursForEdit(commands: PathCommand[], original: GlyphPoint[][] | null): { contours: GlyphPoint[][]; preserved: boolean } {
+	if (original) {
+		const exact = alignByStructure(commands, original)
+		if (exact) return { contours: exact, preserved: true }
+	}
 	const explicit = commandsToContours(commands)
 	if (original) {
 		const aligned = alignContours(explicit, original)

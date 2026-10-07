@@ -393,3 +393,115 @@ describe('editor: moving a point of a TrueType outline', () => {
 		expect(movePoint(cmds, 2, 'x1y1', 7, 7)[2]).toEqual({ type: 'Q', x1: 7, y1: 7, x: 0, y: 0 })
 	})
 })
+
+describe('editor: dragging a handle of a variable TrueType glyph (panel round 3 regression)', () => {
+	/** Indices of the Q commands in an outline whose end point is implied (midway between two handles). */
+	function impliedEnds(cmds: PathCommand[]): number[] {
+		const out: number[] = []
+		let start = 0
+		cmds.forEach((c, i) => {
+			if (c.type === 'M') start = i
+			if (c.type !== 'Z') return
+			const first = start + 1, n = i - first
+			for (let k = 0; k < n; k++) {
+				const a = cmds[first + k], b = cmds[first + ((k + 1) % n)]
+				if (a.type === 'Q' && b.type === 'Q' && a.x === (a.x1 + b.x1) / 2 && a.y === (a.y1 + b.y1) / 2) out.push(first + k)
+			}
+		})
+		return out
+	}
+
+	/** The bytes of the gvar table in a written font. */
+	async function gvarOf(blob: Blob): Promise<number[]> {
+		return Array.from(readSfnt(await bytes(blob)).tables.gvar)
+	}
+
+	it('Roboto Flex o has implied points, so the case is real', async () => {
+		const font = await parseFont(ROBOTO_FLEX)
+		expect(impliedEnds(getGlyphCommands(font, 'o')).length).toBeGreaterThan(0)
+	})
+
+	it('one handle drag on o keeps the glyph varying and leaves gvar byte-identical', async () => {
+		const font = await parseFont(ROBOTO_FLEX)
+		const cmds = getGlyphCommands(font, 'o')
+		const idx = impliedEnds(cmds)[0]
+		const q = cmds[idx] as { x1: number; y1: number }
+		const moved = movePoint(cmds, idx, 'x1y1', q.x1 + 30, q.y1 + 20)
+		// The implied end followed the handle to the new midpoint.
+		expect(impliedEnds(moved)).toEqual(impliedEnds(cmds))
+		setGlyphCommands(font, 'o', moved)
+		const blob = fontToBlob(font)
+		const info = getWriteInfo(blob)!
+		expect(info.editedGlyphs).toEqual([font._font.charToGlyphIndex('o')])
+		expect(info.frozenGlyphs).toEqual([])
+		expect(await gvarOf(blob)).toEqual(Array.from(readSfnt(ROBOTO_FLEX).tables.gvar))
+	})
+
+	it('no single drag of any handle or anchor of A V T o f i freezes the glyph', async () => {
+		let drags = 0
+		for (const ch of ['A', 'V', 'T', 'o', 'f', 'i']) {
+			const font = await parseFont(ROBOTO_FLEX)
+			const cmds = getGlyphCommands(font, ch)
+			for (let i = 0; i < cmds.length; i++) {
+				const c = cmds[i]
+				if (c.type === 'Z') continue
+				const fields: ('xy' | 'x1y1')[] = c.type === 'Q' ? ['xy', 'x1y1'] : ['xy']
+				for (const field of fields) {
+					const x = field === 'xy' ? c.x : (c as { x1: number }).x1, y = field === 'xy' ? c.y : (c as { y1: number }).y1
+					setGlyphCommands(font, ch, movePoint(cmds, i, field, x + 23, y - 17))
+					const info = getWriteInfo(fontToBlob(font))!
+					expect(info.frozenGlyphs, `${ch} command ${i} ${field}`).toEqual([])
+					expect(info.editedGlyphs.length, `${ch} command ${i} ${field}`).toBe(1)
+					drags++
+				}
+			}
+		}
+		expect(drags).toBeGreaterThan(100)
+	})
+
+	it('dragging an implied anchor carries its two handles with it', () => {
+		// A contour of four curves whose ends are all implied (a TrueType circle-like shape).
+		const cmds: PathCommand[] = [
+			{ type: 'M', x: 50, y: 0 },
+			{ type: 'Q', x1: 100, y1: 0, x: 100, y: 50 },
+			{ type: 'Q', x1: 100, y1: 100, x: 50, y: 100 },
+			{ type: 'Q', x1: 0, y1: 100, x: 0, y: 50 },
+			{ type: 'Q', x1: 0, y1: 0, x: 50, y: 0 },
+			{ type: 'Z' },
+		]
+		const moved = movePoint(cmds, 1, 'xy', 110, 50)
+		expect(moved[1]).toEqual({ type: 'Q', x1: 110, y1: 0, x: 110, y: 50 })
+		expect(moved[2]).toEqual({ type: 'Q', x1: 110, y1: 100, x: 55, y: 100 })
+		expect(moved[4]).toEqual({ type: 'Q', x1: 0, y1: 0, x: 55, y: 0 })
+		expect(moved[0]).toEqual({ type: 'M', x: 55, y: 0 })
+		expect(contoursForEdit(moved, [[{ x: 100, y: 0, on: false }, { x: 100, y: 100, on: false }, { x: 0, y: 100, on: false }, { x: 0, y: 0, on: false }]]).preserved).toBe(true)
+	})
+})
+
+describe('point structure is kept for every glyph a uniform edit touches', () => {
+	it('widening q in Roboto Flex (a glyph with two stored points on one spot) keeps it varying', async () => {
+		const font = await parseFont(ROBOTO_FLEX)
+		setGlyphCommands(font, 'q', getGlyphCommands(font, 'q').map((c) => {
+			const o = { ...c } as Record<string, unknown>
+			for (const k of ['x', 'x1', 'x2']) if (typeof o[k] === 'number') o[k] = (o[k] as number) * 1.2
+			return o as unknown as PathCommand
+		}))
+		expect(getWriteInfo(fontToBlob(font))!.frozenGlyphs).toEqual([])
+	})
+
+	it('raising any basic Latin letter or digit by 10 units never freezes it, in either font', async () => {
+		const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,;:!?&@'
+		for (const buf of [ROBOTO_FLEX, PT_SERIF]) {
+			const font = await parseFont(buf)
+			const { tables } = readSfnt(buf)
+			const long = new DataView(tables.head.buffer).getInt16(50) === 1, loca = new DataView(tables.loca.buffer)
+			const at = (i: number) => long ? loca.getUint32(i * 4) : loca.getUint16(i * 2) * 2
+			for (const ch of chars) {
+				const gid = font._font.charToGlyphIndex(ch)
+				const original = decodeSimpleGlyph(tables.glyf.subarray(at(gid), at(gid + 1)))
+				if (!original) continue
+				expect(contoursForEdit(raise(getGlyphCommands(font, ch), 10), original).preserved, ch).toBe(true)
+			}
+		}
+	})
+})
