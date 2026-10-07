@@ -113,7 +113,9 @@ async function measureShaping(family: string, unitsPerEm: number): Promise<Shapi
 		el.textContent = text
 		el.style.cssText = `font:${PROBE_PX}px "${family}";font-optical-sizing:none;${css}`
 		host.appendChild(el)
-		return el.getBoundingClientRect().width
+		// Under CSS zoom, getBoundingClientRect reports zoomed pixels: divide it out so the numbers are in CSS px.
+		const zoom = (el as HTMLElement & { currentCSSZoom?: number }).currentCSSZoom || 1
+		return el.getBoundingClientRect().width / zoom
 	}
 	const kernPx = w("AV") - w("A") - w("V")
 	const ligature = w("fi", "font-variant-ligatures:none") - w("fi") > 0.5
@@ -1135,7 +1137,7 @@ export default function Demo() {
 										disabled={disabled}
 										onClick={() => handleWriteMode(mode)}
 										title={mode === "patch"
-											? "Re-encode only the glyphs you edited and copy every other table byte-for-byte (the library's default for TrueType fonts)"
+											? "Re-encode only the glyphs you edited and copy the tables the edit doesn't have to touch, byte for byte (the library's default for TrueType fonts)"
 											: "Re-create the whole file with opentype.js, the way glyphShaper wrote up to version 1.1.0. opentype.js can't write kerning, hinting or variable-font tables; glyphShaper also left out the ligature table, because opentype.js can't write every kind of substitution"}
 										className={`text-xs px-4 py-2 rounded-full border transition-colors ${(writeMode === mode && !disabled) || (mode === "rebuild" && !canPatch) ? "border-foreground/70 bg-foreground/10" : "border-foreground/30 hover:bg-foreground/5"} ${disabled ? "opacity-40 cursor-not-allowed" : ""}`}
 									>
