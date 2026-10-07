@@ -139,11 +139,11 @@ describe('patch write path: PT Serif (static, hinted, kerned)', () => {
 		expect(getFontSource(font)!.byteLength).toBe(PT_SERIF.byteLength)
 		const blob = fontToBlob(font)
 		expect(blob.type).toBe('font/ttf')
-		expect(getWriteInfo(blob)).toEqual({ method: 'patch', editedGlyphs: [], frozenGlyphs: [] })
+		expect(getWriteInfo(blob)).toEqual({ method: 'patch', editedGlyphs: [], dependentGlyphs: [], frozenGlyphs: [] })
 		expect(new Uint8Array(await bytes(blob))).toEqual(new Uint8Array(PT_SERIF))
 	})
 
-	it('an edit to one glyph changes only glyf, loca, hmtx, head and maxp, and drops only the signature', async () => {
+	it('an edit to one glyph changes only the outline tables and the header, and drops only the signature', async () => {
 		const font = await parseFont(PT_SERIF)
 		setGlyphCommands(font, 'A', raise(getGlyphCommands(font, 'A'), 60))
 		const blob = fontToBlob(font)
@@ -185,6 +185,41 @@ describe('patch write path: PT Serif (static, hinted, kerned)', () => {
 			identical++
 		}
 		expect(identical).toBe(n - 1)
+	})
+
+	it('accented letters built from an edited letter are reported, and follow its new width', async () => {
+		const font = await parseFont(PT_SERIF)
+		const gid = font._font.charToGlyphIndex('o')
+		const before = font._font.glyphs.get(gid).advanceWidth!
+		setGlyphCommands(font, 'o', getGlyphCommands(font, 'o').map((c) => {
+			const o = { ...c } as Record<string, unknown>
+			for (const k of ['x', 'x1', 'x2']) if (typeof o[k] === 'number') o[k] = (o[k] as number) * 1.4
+			return o as unknown as PathCommand
+		}))
+		const blob = fontToBlob(font)
+		const info = getWriteInfo(blob)!
+		const reparsed = parse(await bytes(blob))
+		const after = reparsed.glyphs.get(gid).advanceWidth!
+		expect(after).toBeGreaterThan(before)
+		const oDieresis = font._font.charToGlyphIndex('ö'), oAcute = font._font.charToGlyphIndex('ó')
+		expect(info.editedGlyphs).toEqual([gid])
+		expect(info.dependentGlyphs).toContain(oDieresis)
+		expect(info.dependentGlyphs).toContain(oAcute)
+		expect(reparsed.glyphs.get(oDieresis).advanceWidth).toBe(after)
+		expect(reparsed.glyphs.get(oAcute).advanceWidth).toBe(after)
+		// A letter that isn't built from o keeps its width, and isn't listed.
+		const n = font._font.charToGlyphIndex('n')
+		expect(info.dependentGlyphs).not.toContain(n)
+		expect(reparsed.glyphs.get(n).advanceWidth).toBe(font._font.glyphs.get(n).advanceWidth)
+	})
+
+	it('compareFontTables is strict: head counts as changed once anything else did', async () => {
+		const font = await parseFont(PT_SERIF)
+		setGlyphCommands(font, 'A', raise(getGlyphCommands(font, 'A'), 60))
+		const cmp = compareFontTables(PT_SERIF, await bytes(fontToBlob(font)))
+		expect(cmp.changed.sort()).toEqual(['glyf', 'head', 'loca'])
+		expect(cmp.kept.length).toBe(16)
+		expect(cmp.dropped).toEqual(['DSIG'])
 	})
 
 	it('putting the original outline back is not an edit', async () => {

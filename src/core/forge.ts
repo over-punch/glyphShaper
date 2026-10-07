@@ -350,7 +350,7 @@ export function fontToBlob(font: GlyphFont, options: FontWriteOptions = {}): Blo
 			}
 			const result = patchGlyphs(font._source, edits)
 			const blob = new Blob([result.bytes as BlobPart], { type: 'font/ttf' })
-			blobMeta.set(blob, { ...meta, write: { method: 'patch', editedGlyphs: result.edited, frozenGlyphs: result.frozen } })
+			blobMeta.set(blob, { ...meta, write: { method: 'patch', editedGlyphs: result.edited, dependentGlyphs: result.dependents, frozenGlyphs: result.frozen } })
 			return blob
 		}
 		if (mode === 'patch') {
@@ -376,7 +376,7 @@ export function fontToBlob(font: GlyphFont, options: FontWriteOptions = {}): Blo
 		throw new Error(`[glyphshaper] this font could not be written back (${err instanceof Error ? err.message : String(err)})`)
 	}
 	const blob = new Blob([buffer], { type: 'font/opentype' })
-	blobMeta.set(blob, { ...meta, write: { method: 'rebuild', editedGlyphs: Array.from(font._edits?.keys() ?? []), frozenGlyphs: [] } })
+	blobMeta.set(blob, { ...meta, write: { method: 'rebuild', editedGlyphs: Array.from(font._edits?.keys() ?? []), dependentGlyphs: [], frozenGlyphs: [] } })
 	return blob
 }
 
@@ -388,7 +388,7 @@ export function fontToBlob(font: GlyphFont, options: FontWriteOptions = {}): Blo
  */
 export function getWriteInfo(blob: Blob): FontWriteInfo | undefined {
 	const info = blobMeta.get(blob)?.write
-	return info ? { method: info.method, editedGlyphs: [...info.editedGlyphs], frozenGlyphs: [...info.frozenGlyphs] } : undefined
+	return info ? { method: info.method, editedGlyphs: [...info.editedGlyphs], dependentGlyphs: [...info.dependentGlyphs], frozenGlyphs: [...info.frozenGlyphs] } : undefined
 }
 
 /**

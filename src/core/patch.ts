@@ -30,6 +30,11 @@ export interface PatchResult {
 	/** Glyph ids whose outline was re-encoded */
 	edited: number[]
 	/**
+	 * Glyph ids of composite glyphs built from an edited glyph (accented letters, usually). Their own bytes are
+	 * unchanged, so they show the edited outline. One that shared its base's advance width follows the new width.
+	 */
+	dependents: number[]
+	/**
 	 * Glyph ids of a variable font whose point structure changed, so their own variation data was removed:
 	 * these glyphs keep one shape at every axis setting. Every other glyph still varies.
 	 */
@@ -300,6 +305,33 @@ export function encodeSimpleGlyph(contours: GlyphPoint[][]): Uint8Array {
 	return out
 }
 
+/** Composite glyph component flags (OpenType glyf table). */
+const ARGS_ARE_WORDS = 0x0001, HAS_SCALE = 0x0008, MORE_COMPONENTS = 0x0020, HAS_XY_SCALE = 0x0040, HAS_2X2 = 0x0080, USE_MY_METRICS = 0x0200
+
+/**
+ * The components of a composite glyph: which glyph each one draws, and whether the composite takes its
+ * metrics from it. Returns an empty list for a simple or empty glyph.
+ *
+ * @param g - One glyph's bytes from the glyf table
+ */
+export function compositeComponents(g: Uint8Array): { glyphId: number; useMyMetrics: boolean }[] {
+	if (g.length < 10) return []
+	const d = view(g)
+	if (d.getInt16(0) >= 0) return []
+	const out: { glyphId: number; useMyMetrics: boolean }[] = []
+	let p = 10
+	while (p + 4 <= g.length) {
+		const flags = d.getUint16(p)
+		out.push({ glyphId: d.getUint16(p + 2), useMyMetrics: (flags & USE_MY_METRICS) !== 0 })
+		p += 4 + ((flags & ARGS_ARE_WORDS) ? 4 : 2)
+		if (flags & HAS_SCALE) p += 2
+		else if (flags & HAS_XY_SCALE) p += 4
+		else if (flags & HAS_2X2) p += 8
+		if (!(flags & MORE_COMPONENTS)) break
+	}
+	return out
+}
+
 // ─── Path commands → TrueType points ──────────────────────────────────────────
 
 /** True if two coordinates are the same point (within floating-point noise). */
@@ -500,6 +532,10 @@ export function clearGvarGlyphs(gvar: Uint8Array, gids: Iterable<number>): Uint8
  * byte-for-byte: every other table, including GSUB, GPOS and kern (ligatures, kerning), fpgm, prep and cvt
  * (hinting programs), and fvar, gvar, HVAR, avar and STAT (variable-font data).
  *
+ * Composite glyphs built from an edited glyph (ö from o) keep their own bytes, so they show the new outline;
+ * one that shared the base's advance width gets the new width (see `dependents`). Its accent keeps its old
+ * position, and a ligature that is a glyph of its own (not built from the letter) doesn't change.
+ *
  * Removed: DSIG (a digital signature no longer matches an edited file) and, when an advance width changed,
  * the hdmx and LTSH device-metric caches. The edited glyphs lose their own TrueType instructions. In a
  * variable font, an edit that adds or removes points removes that glyph's variation data (see `frozen`).
@@ -510,7 +546,7 @@ export function clearGvarGlyphs(gvar: Uint8Array, gids: Iterable<number>): Uint8
  * @param edits  - New outlines by glyph id
  */
 export function patchGlyphs(source: Uint8Array, edits: Map<number, GlyphEdit>): PatchResult {
-	if (edits.size === 0) return { bytes: source, edited: [], frozen: [] }
+	if (edits.size === 0) return { bytes: source, edited: [], dependents: [], frozen: [] }
 	const { sfntVersion, tables } = readSfnt(source)
 	if (!canPatch({ sfntVersion, tables })) {
 		throw new Error('[glyphshaper] only fonts with TrueType (glyf) outlines can be patched; this one has CFF outlines')
@@ -530,8 +566,30 @@ export function patchGlyphs(source: Uint8Array, edits: Map<number, GlyphEdit>): 
 		else { advances.push(advances[numHM - 1] ?? 0); lsbs.push(hm.getInt16(numHM * 4 + (i - numHM) * 2)) }
 	}
 
+	// Composite glyphs built from an edited glyph, found before any bytes change (nested composites included).
+	const original = slices.slice()
+	const oldAdvances = advances.slice()
+	const components = original.map((g) => compositeComponents(g))
+	const dependents: number[] = []
+	const affected = new Set<number>(edits.keys())
+	for (let grew = true; grew;) {
+		grew = false
+		components.forEach((list, gid) => {
+			if (affected.has(gid) || !list.some((c) => affected.has(c.glyphId))) return
+			affected.add(gid); dependents.push(gid); grew = true
+		})
+	}
+	dependents.sort((a, b) => a - b)
+
 	const edited: number[] = [], frozen: number[] = []
 	let advanceChanged = false, widen = false
+	/** Set one glyph's advance width, noting whether hmtx has to grow to hold it. */
+	const setAdvance = (gid: number, adv: number) => {
+		if (adv === advances[gid]) return
+		advances[gid] = adv
+		advanceChanged = true
+		if (gid >= numHM - 1 && numHM < numGlyphs) widen = true
+	}
 	for (const [gid, edit] of edits) {
 		if (!Number.isInteger(gid) || gid < 0 || gid >= numGlyphs) throw new RangeError(`[glyphshaper] glyph id ${gid} is not in this font`)
 		const { contours, preserved } = contoursForEdit(edit.commands, decodeSimpleGlyph(slices[gid]))
@@ -548,18 +606,21 @@ export function patchGlyphs(source: Uint8Array, edits: Map<number, GlyphEdit>): 
 			hd.setInt16(42, Math.max(hd.getInt16(42), g.getInt16(8)))
 		}
 		if (edit.advanceWidth != null) {
-			const adv = Math.min(65535, Math.max(0, Math.round(edit.advanceWidth)))
-			if (adv !== advances[gid]) {
-				advances[gid] = adv
-				advanceChanged = true
-				if (gid >= numHM - 1 && numHM < numGlyphs) widen = true
-			}
+			setAdvance(gid, Math.min(65535, Math.max(0, Math.round(edit.advanceWidth))))
 		}
 		if (mp.byteLength >= 32) {
 			const nPts = contours.reduce((s, c) => s + c.length, 0)
 			if (nPts > mp.getUint16(6)) mp.setUint16(6, nPts)
 			if (contours.length > mp.getUint16(8)) mp.setUint16(8, contours.length)
 		}
+	}
+
+	// A composite that took its width from an edited base (the USE_MY_METRICS flag, or simply the same
+	// advance, as an accented letter has) follows the base's new width; otherwise ö would keep o's old width.
+	for (const gid of dependents) {
+		const list = components[gid]
+		const base = list.find((c) => c.useMyMetrics && affected.has(c.glyphId)) ?? list.find((c) => affected.has(c.glyphId) && oldAdvances[c.glyphId] === oldAdvances[gid])
+		if (base) setAdvance(gid, advances[base.glyphId])
 	}
 
 	// glyf and a long loca: untouched glyphs are copied as they were.
@@ -583,13 +644,13 @@ export function patchGlyphs(source: Uint8Array, edits: Map<number, GlyphEdit>): 
 	}
 	const hh = view(hhea)
 	hh.setUint16(34, outHM)
-	if (advanceChanged) hh.setUint16(10, Math.max(hh.getUint16(10), ...Array.from(edits.keys(), (g) => advances[g])))
+	if (advanceChanged) hh.setUint16(10, Math.max(hh.getUint16(10), ...Array.from(affected, (g) => advances[g])))
 
 	const out: Record<string, Uint8Array> = { ...tables, glyf, loca, head, hmtx, maxp, hhea }
 	delete out.DSIG
 	if (advanceChanged) { delete out.hdmx; delete out.LTSH }
 	if (frozen.length && out.gvar) out.gvar = clearGvarGlyphs(out.gvar, frozen)
-	return { bytes: writeSfnt(sfntVersion, out), edited, frozen }
+	return { bytes: writeSfnt(sfntVersion, out), edited, dependents, frozen }
 }
 
 // ─── Compare ──────────────────────────────────────────────────────────────────
@@ -603,8 +664,8 @@ function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
 
 /**
  * Compare two font files table by table: which tables are byte-identical, which changed, which are gone and
- * which are new. Use it to check what a write did to a font. head always differs between two different
- * files (it holds the whole-file checksum), so it is compared with that one field ignored.
+ * which are new. Use it to check what a write did to a font. The comparison is strict: head holds a checksum
+ * of the whole file, so it counts as changed whenever anything else did.
  *
  * @param original - The font before the write (TTF or OTF bytes)
  * @param written  - The font after the write
@@ -612,15 +673,9 @@ function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
 export function compareFontTables(original: ArrayBuffer | Uint8Array, written: ArrayBuffer | Uint8Array): TableComparison {
 	const a = readSfnt(original).tables, b = readSfnt(written).tables
 	const result: TableComparison = { kept: [], changed: [], dropped: [], added: [] }
-	const norm = (tag: string, t: Uint8Array) => {
-		if (tag !== 'head' || t.length < 12) return t
-		const c = t.slice()
-		view(c).setUint32(8, 0)
-		return c
-	}
 	for (const tag of Object.keys(a).sort()) {
 		if (!b[tag]) result.dropped.push(tag)
-		else if (sameBytes(norm(tag, a[tag]), norm(tag, b[tag]))) result.kept.push(tag)
+		else if (sameBytes(a[tag], b[tag])) result.kept.push(tag)
 		else result.changed.push(tag)
 	}
 	for (const tag of Object.keys(b).sort()) if (!a[tag]) result.added.push(tag)

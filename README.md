@@ -40,7 +40,7 @@ npm install wawoff2
 
 > **Variable fonts:** opentype.js re-serialises only the static outline, not the `gvar`/`fvar`/`avar`/`STAT` tables. After `applyFontBlob()`, the overridden family is a **static snapshot** — the same outline at every weight, and CSS `font-variation-settings` no longer take effect for that family. `glyphShaper` logs a `console.warn` when it detects a variable font.
 
-> **What a write keeps.** For fonts with TrueType outlines (`.ttf`, most `.woff` and `.woff2`), `fontToBlob()` re-encodes **only the glyphs you edited** and copies every other table byte-for-byte: `GSUB`, `GPOS` and `kern` (ligatures, kerning), `fpgm`, `prep` and `cvt ` (hinting), and `fvar`, `gvar`, `HVAR`, `avar` and `STAT` (variable axes). With no edits the blob is the original file. What changes: `glyf`, `loca` and the edited glyphs' `hmtx` entries; a `DSIG` signature is removed (it no longer matches), and `hdmx`/`LTSH` are removed if an advance width changed. The edited glyph loses its own TrueType instructions. In a variable font, an edit that only moves points keeps the glyph varying; an edit that adds or removes points removes that one glyph's variation data (`getWriteInfo(blob).frozenGlyphs`), and it keeps one shape at every axis setting. A cubic curve (`C`) written into a TrueType glyph becomes four quadratic curves.
+> **What a write keeps.** For fonts with TrueType outlines (`.ttf`, most `.woff` and `.woff2`), `fontToBlob()` re-encodes **only the glyphs you edited** and copies every other table byte-for-byte: `GSUB`, `GPOS` and `kern` (ligatures, kerning), `fpgm`, `prep` and `cvt ` (hinting), and `fvar`, `gvar`, `HVAR`, `avar` and `STAT` (variable axes). With no edits the blob is the original file. What changes: `glyf`, `loca`, `head` (it holds the whole-file checksum) and, when a width changes, the edited glyphs' `hmtx` entries; a `DSIG` signature is removed (it no longer matches), and `hdmx`/`LTSH` are removed if an advance width changed. The edited glyph loses its own TrueType instructions. Composite glyphs built from an edited glyph (ö from o) aren't rewritten: they show the new outline and follow its new advance width (`getWriteInfo(blob).dependentGlyphs`), with accents left where they were. A ligature that is a glyph of its own doesn't pick up an edit to its letters. The kerning and variation data that are kept were made for the original shapes. In a variable font, an edit that only moves points keeps the glyph varying; an edit that adds or removes points removes that one glyph's variation data (`getWriteInfo(blob).frozenGlyphs`), and it keeps one shape at every axis setting. A cubic curve (`C`) written into a TrueType glyph becomes four quadratic curves.
 >
 > **Fonts with CFF outlines** (most `.otf`) are still rebuilt with opentype.js, which can't write `GSUB`, `GPOS`, `kern` or `GDEF`: the overridden family loses **kerning** and **ligatures** (rebuilt PT Serif sets "AVAVAV To Ty WA" at 874.3px instead of 804.5px at 100px in Chromium 149: its width with kerning off), hinting and variable axes, and composite glyphs are flattened. Pass `{ write: 'rebuild' }` to get this path on any font, or `{ write: 'patch' }` to throw instead of falling back.
 
@@ -169,7 +169,7 @@ The blob's type is `font/ttf` for a patched font and `font/opentype` for a rebui
 
 ### `getWriteInfo(blob)`
 
-Returns `{ method: 'patch' | 'rebuild', editedGlyphs: number[], frozenGlyphs: number[] }` for a blob from `fontToBlob()`: which path ran, which glyph ids were edited, and which glyphs of a variable font lost their own variation data.
+Returns `{ method: 'patch' | 'rebuild', editedGlyphs: number[], dependentGlyphs: number[], frozenGlyphs: number[] }` for a blob from `fontToBlob()`: which path ran, which glyph ids were edited, which composite glyphs are built from them, and which glyphs of a variable font lost their own variation data.
 
 ### `getFontSource(font)`
 
@@ -177,12 +177,12 @@ Returns a copy of the sfnt bytes the font was parsed from (`ArrayBuffer`), or `n
 
 ### `compareFontTables(original, written)`
 
-Compares two TTF/OTF files table by table and returns `{ kept, changed, dropped, added }` (arrays of table tags; `kept` means byte-identical). Use it to check what a write did:
+Compares two TTF/OTF files table by table and returns `{ kept, changed, dropped, added }` (arrays of table tags; `kept` means byte-identical, and `head` counts as changed whenever anything else did, because it holds a checksum of the whole file). Use it to check what a write did:
 
 ```ts
 const blob = fontToBlob(font)
 const { kept, changed, dropped } = compareFontTables(getFontSource(font)!, await blob.arrayBuffer())
-// one glyph of PT Serif edited: kept 17 of 20 tables, changed ['glyf', 'loca'], dropped ['DSIG']
+// one glyph of PT Serif edited, width unchanged: kept 16 of 20 tables, changed ['glyf', 'head', 'loca'], dropped ['DSIG']
 ```
 
 ### `applyFontBlob(fontFamily, blob, previousUrl?, options?)`

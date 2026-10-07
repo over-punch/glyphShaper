@@ -59,6 +59,12 @@ export interface FontWriteInfo {
 	/** Glyph ids whose outlines were edited */
 	editedGlyphs: number[]
 	/**
+	 * Patch path: glyph ids of composite glyphs built from an edited glyph (accented letters, usually). They
+	 * show the edited outline, and follow its advance width when they shared it. Empty for a rebuild, which
+	 * flattens composites.
+	 */
+	dependentGlyphs: number[]
+	/**
 	 * Patch path, variable fonts only: glyph ids whose edit added or removed points, so their own variation
 	 * data was removed. They keep one shape at every axis setting; every other glyph still varies.
 	 */

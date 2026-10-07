@@ -20,10 +20,10 @@ export default function Home() {
 			>
 				<p className="text-base leading-relaxed max-w-lg">
 					Click any character and reshape its outline. glyphShaper writes back only the glyph you
-					edited: every other table in the font is copied byte for byte, so kerning, ligatures,
-					hinting and variable axes stay as the designer made them. The result loads as a
-					dynamic <code className="text-xs font-mono">@font-face</code> override, and every
-					instance of that character on the page re-renders. No server, no export, no page reload.
+					edited. The tables that hold the font&rsquo;s kerning, ligatures, hinting programs and
+					variable axes are copied untouched, so the rest of the font behaves as its designer made it.
+					The result loads as a dynamic <code className="text-xs font-mono">@font-face</code> override,
+					and every instance of that character on the page re-renders. No server, no export, no page reload.
 				</p>
 			</Hero>
 

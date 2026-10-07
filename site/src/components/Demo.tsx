@@ -80,13 +80,15 @@ type WriteReport = {
 	axesKept: boolean
 	/** Edited glyphs of a variable font that lost their own variation data (the edit added or removed points) */
 	frozen: number
+	/** Glyphs built from an edited glyph (accented letters): not rewritten, but they show the edit */
+	dependents: number
 }
 
 /** Kerning and ligature behaviour measured in the browser for one font family */
 type Shaping = {
 	/** Kerning between A and V in font units (0 = none) */
 	kernAV: number
-	/** True if "ffi" sets narrower with ligatures on than off */
+	/** True if "fi" sets narrower with ligatures on than off */
 	ligature: boolean
 	/** How much narrower kerning makes the kerning specimen line at 100 CSS px (optical sizing off), in px */
 	kernGain: number
@@ -101,7 +103,7 @@ const UNTOUCHED_CHAR = "H"
  */
 async function measureShaping(family: string, unitsPerEm: number): Promise<Shaping | null> {
 	if (typeof document === "undefined") return null
-	try { await document.fonts.load(`${PROBE_PX}px "${family}"`, "AVffi") } catch { return null }
+	try { await document.fonts.load(`${PROBE_PX}px "${family}"`, "AVfi") } catch { return null }
 	const host = document.createElement("div")
 	host.setAttribute("aria-hidden", "true")
 	host.style.cssText = "position:absolute;left:-99999px;top:0;visibility:hidden;white-space:pre;"
@@ -114,7 +116,7 @@ async function measureShaping(family: string, unitsPerEm: number): Promise<Shapi
 		return el.getBoundingClientRect().width
 	}
 	const kernPx = w("AV") - w("A") - w("V")
-	const ligature = w("ffi", "font-variant-ligatures:none") - w("ffi") > 0.5
+	const ligature = w("fi", "font-variant-ligatures:none") - w("fi") > 0.5
 	const kernGain = Math.round(((w(SPEC_KERN, "font-kerning:none") - w(SPEC_KERN)) / PROBE_PX) * 1000) / 10
 	host.remove()
 	return { kernAV: Math.round((kernPx / PROBE_PX) * unitsPerEm), ligature, kernGain }
@@ -623,7 +625,7 @@ function ReportRow({ label, value, mark }: { label: string; value: string; mark:
 
 /** What each table a write can touch holds, in plain words */
 const TABLE_WORDS: Record<string, string> = {
-	glyf: "the outlines", loca: "the outlines’ index", hmtx: "letter widths", head: "the file header", hhea: "the widest-letter record",
+	glyf: "the outlines", loca: "the outlines’ index", hmtx: "letter widths", head: "the file header, which holds a checksum of the whole file", hhea: "the widest-letter record",
 	maxp: "size limits", gvar: "variation data", DSIG: "a signature that no longer matches the edited file",
 	hdmx: "a per-size width cache, stale once a width changes", LTSH: "a per-size width cache, stale once a width changes",
 }
@@ -669,7 +671,7 @@ function WriteReportPanel({ report, original, written, untouchedDiff }: { report
 				mark={written && original ? (original.kernAV === 0 ? "na" : written.kernAV === original.kernAV ? "yes" : "no") : "na"}
 			/>
 			<ReportRow
-				label="Ligature, ffi"
+				label="Ligature, fi"
 				value={written && original ? (original.ligature ? (written.ligature ? "kept" : "lost") : "none in this font") : "measuring…"}
 				mark={written && original ? (original.ligature ? (written.ligature ? "yes" : "no") : "na") : "na"}
 			/>
@@ -680,8 +682,8 @@ function WriteReportPanel({ report, original, written, untouchedDiff }: { report
 			/>
 			<ReportRow
 				label={`Untouched letter, ${UNTOUCHED_CHAR}`}
-				value={untouchedDiff === null ? "measuring…" : untouchedDiff === 0 ? "pixel-identical" : `${n(untouchedDiff)} pixels differ`}
-				mark={untouchedDiff === null ? "na" : untouchedDiff === 0 ? "yes" : "no"}
+				value={untouchedDiff === null ? "measuring…" : untouchedDiff < 0 ? "not compared" : untouchedDiff === 0 ? "pixel-identical" : `${n(untouchedDiff)} pixels differ`}
+				mark={untouchedDiff === null || untouchedDiff < 0 ? "na" : untouchedDiff === 0 ? "yes" : "no"}
 			/>
 			<ReportRow label="Kerning and ligature tables, byte for byte" value={layout.value} mark={layout.mark} />
 			<ReportRow label="Hinting programs, byte for byte" value={hinting.value} mark={hinting.mark} />
@@ -694,8 +696,9 @@ function WriteReportPanel({ report, original, written, untouchedDiff }: { report
 					{t.changed.length > 0 && <p>Rewritten: {describeTables(t.changed)}.</p>}
 					{t.dropped.length > 0 && <p>Removed: {describeTables(t.dropped)}.</p>}
 					{t.added.length > 0 && <p>Added: {describeTables(t.added)}.</p>}
+					{patch && report.dependents > 0 && <p>{report.dependents} other glyph{report.dependents > 1 ? "s are" : " is"} built from {report.glyphsRewritten > 1 ? "the edited glyphs" : "the edited glyph"} (accented letters such as ö from o). {report.dependents > 1 ? "They aren’t" : "It isn’t"} rewritten, but {report.dependents > 1 ? "they show" : "it shows"} the new shape and follow{report.dependents > 1 ? "" : "s"} its new width; accents stay where they were.</p>}
 					{patch && report.glyphsRewritten > 0 && hinting.mark === "yes" && <p>The edited glyph loses its own hinting instructions; the font’s hinting programs and every other glyph’s instructions are as they were.</p>}
-					{patch && report.frozen > 0 && <p>Frozen: {report.frozen > 1 ? `${report.frozen} edited glyphs` : "one edited glyph"} no longer var{report.frozen > 1 ? "y" : "ies"}. The edit changed how many points the outline has or their order (or the glyph was assembled from other glyphs), so the font’s variation data for {report.frozen > 1 ? "those glyphs" : "that glyph"} no longer fits and was removed. {report.frozen > 1 ? "They keep" : "It keeps"} one shape at every weight; every other glyph still varies.</p>}
+					{patch && report.frozen > 0 && <p>Frozen: {report.frozen > 1 ? `${report.frozen} edited glyphs` : "one edited glyph"} no longer var{report.frozen > 1 ? "y" : "ies"}. The edit changed the outline’s point structure (a point added or removed, a point the font only implied moved on its own, or a glyph assembled from other glyphs), so the font’s variation data for {report.frozen > 1 ? "those glyphs" : "that glyph"} no longer fits and was removed. {report.frozen > 1 ? "They keep" : "It keeps"} one shape at every weight; every other glyph still varies.</p>}
 				</div>
 			)}
 		</dl>
@@ -720,7 +723,7 @@ export default function Demo() {
 	const [report, setReport]       = useState<WriteReport | null>(null)
 	const [origShaping, setOrigShaping]       = useState<Shaping | null>(null)
 	const [writtenShaping, setWrittenShaping] = useState<Shaping | null>(null)
-	// Pixels of an untouched letter that differ between the original and the written font (null while measuring)
+	// Pixels of an untouched letter that differ between the original and the written font (null while measuring, -1 when it can't be compared)
 	const [untouchedDiff, setUntouchedDiff] = useState<number | null>(null)
 	// Weight for variable fonts (font-variation-settings "wght"); null until a variable font is loaded
 	const [wght, setWght]           = useState<number | null>(null)
@@ -734,6 +737,8 @@ export default function Demo() {
 	const [globalAdj, setGlobalAdj] = useState<Adjustments>(ADJ_ZERO)
 	// Per-character adjustments
 	const [charAdjs, setCharAdjs]   = useState<Map<string, Adjustments>>(new Map())
+	// Letters whose outline was changed in the Path tab (for the "edited:" label)
+	const [pathEdited, setPathEdited] = useState<string[]>([])
 
 	// Bezier editor state (managed here to avoid font-blob conflicts with GlyphShaperEditor)
 	const [bezierCmds, setBezierCmds]         = useState<PathCommand[]>([])
@@ -796,7 +801,7 @@ export default function Demo() {
 		const base: WriteReport = {
 			method, ms, glyphsTotal,
 			glyphsRewritten: method === "patch" ? (info?.editedGlyphs.length ?? 0) : glyphsTotal,
-			tables: null, axes, axesKept: method === "patch", frozen: info?.frozenGlyphs.length ?? 0,
+			tables: null, axes, axesKept: method === "patch", frozen: info?.frozenGlyphs.length ?? 0, dependents: info?.dependentGlyphs.length ?? 0,
 		}
 		setReport(base)
 		setWrittenShaping(null)
@@ -813,7 +818,7 @@ export default function Demo() {
 			const shaping = await measureShaping(DEMO_FAMILY, ot.unitsPerEm ?? 1000)
 			const diff = origFaceRef.current ? await glyphPixelDiff(ORIGINAL_FAMILY, DEMO_FAMILY, UNTOUCHED_CHAR) : null
 			if (seq !== writeSeqRef.current) return
-			setUntouchedDiff(diff)
+			setUntouchedDiff(diff ?? -1)
 			setReport({ ...base, tables, axesKept: tables ? [...tables.kept, ...tables.changed].includes("fvar") : base.axesKept })
 			setWrittenShaping(shaping)
 		})
@@ -855,6 +860,7 @@ export default function Demo() {
 		setCharAdjs(new Map())
 		setSelectedChar(null)
 		setAnchorRect(null)
+		setPathEdited([])
 		origCmdsRef.current = new Map(pristineRef.current)
 		if (adjTimerRef.current) clearTimeout(adjTimerRef.current)
 		if (font) applyAdjs(font, ADJ_ZERO, new Map())
@@ -906,6 +912,7 @@ export default function Demo() {
 		// Re-load bezier editor from the new snapshot
 		setBezierCmds(baked.map(c => ({ ...c }) as PathCommand))
 		setBezierHistory([])
+		setPathEdited(prev => prev.includes(selectedChar) ? prev : [...prev, selectedChar])
 	}
 
 	function handleBezierCancel() {
@@ -972,6 +979,9 @@ export default function Demo() {
 		setError(null)
 		setFont(null)
 		setReport(null)
+		setPathEdited([])
+		writeModeRef.current = "patch"
+		setWriteMode("patch")
 		setSelectedChar(null)
 		setAnchorRect(null)
 		setGlobalAdj(ADJ_ZERO)
@@ -1126,7 +1136,7 @@ export default function Demo() {
 										onClick={() => handleWriteMode(mode)}
 										title={mode === "patch"
 											? "Re-encode only the glyphs you edited and copy every other table byte-for-byte (the library's default for TrueType fonts)"
-											: "Re-create the whole file from opentype.js's object model (what glyphShaper did up to version 1.1.0)"}
+											: "Re-create the whole file with opentype.js, the way glyphShaper wrote up to version 1.1.0. opentype.js can't write kerning, hinting or variable-font tables; glyphShaper also left out the ligature table, because opentype.js can't write every kind of substitution"}
 										className={`text-xs px-4 py-2 rounded-full border transition-colors ${(writeMode === mode && !disabled) || (mode === "rebuild" && !canPatch) ? "border-foreground/70 bg-foreground/10" : "border-foreground/30 hover:bg-foreground/5"} ${disabled ? "opacity-40 cursor-not-allowed" : ""}`}
 									>
 										{label}
@@ -1169,7 +1179,7 @@ export default function Demo() {
 										{ch}
 									</button>
 								))}
-								{charAdjs.size > 0 && <span className="text-xs text-muted">edited: {Array.from(charAdjs.keys()).join(" ")}</span>}
+								{(charAdjs.size > 0 || pathEdited.length > 0) && <span className="text-xs text-muted">edited: {Array.from(new Set([...charAdjs.keys(), ...pathEdited])).join(" ")}</span>}
 							</div>
 						</div>
 						<div>
@@ -1193,7 +1203,7 @@ export default function Demo() {
 					)}
 
 					{/* Global adjustment sliders */}
-					<p className="text-xs uppercase tracking-[0.18em] text-muted mb-3">Or reshape every glyph at once</p>
+					<p className="text-xs uppercase tracking-[0.18em] text-muted mb-3">Or reshape every letter used on this page at once</p>
 					<div className="grid grid-cols-2 sm:grid-cols-4 gap-6 mb-8">
 						<AdjSlider label="Width"           value={globalAdj.width}     min={-50} max={100} onChange={v => handleGlobalAdjChange("width",     v)} title="Scale every glyph horizontally around its centre — positive values widen all characters, negative values condense them" />
 						<AdjSlider label="Shoulders"       value={globalAdj.shoulders} min={-80} max={100} onChange={v => handleGlobalAdjChange("shoulders", v)} title="Globally stretch or compress Bézier handle distances — higher values make all curves rounder and more swollen" />
@@ -1220,7 +1230,7 @@ export default function Demo() {
 			{!loading && (
 				<p className="text-xs text-muted italic mt-6" style={{ lineHeight: "1.8" }}>
 					{font
-						? "Click any letter to reshape it, then switch the write path. Kerning, the ligature and the untouched letter are measured in your browser after every write; the table lines compare the written file with the original, byte for byte. Two limits of writing back one glyph: ligatures such as ffi are glyphs of their own, so an edited f doesn’t reach them, and the kerning that is kept is the original’s, made for the original shapes."
+						? "Click any letter to reshape it, then switch the write path. Kerning, the ligature and the untouched letter are measured in your browser after every write; the table lines compare the written file with the original, byte for byte. Limits of writing back one glyph: a ligature that is a glyph of its own (PT Serif’s fi) doesn’t pick up an edited f, though one assembled from the letter does; the kerning and the variation data that are kept are the original’s, made for the original shapes; and a font with CFF outlines can only be rebuilt."
 						: "PT Serif loads by default — swap it for Roboto Flex or any TTF, OTF, WOFF, or WOFF2 above."
 					}
 				</p>
