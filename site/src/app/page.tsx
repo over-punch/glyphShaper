@@ -19,17 +19,17 @@ export default function Home() {
 				tech={["TypeScript", "opentype.js", "React + Vanilla JS", "No server"]}
 			>
 				<p className="text-base leading-relaxed max-w-lg">
-					Click any character, drag its bezier control points to reshape the outline, then
-					hit Apply. glyphShaper regenerates the font binary in the browser and injects a
-					dynamic <code className="text-xs font-mono">@font-face</code> override — every
-					instance of that character on the page re-renders instantly. No server, no export,
-					no page reload.
+					Click any character and reshape its outline. glyphShaper writes back only the glyph you
+					edited: every other table in the font is copied byte for byte, so kerning, ligatures,
+					hinting and variable axes stay as the designer made them. The result loads as a
+					dynamic <code className="text-xs font-mono">@font-face</code> override, and every
+					instance of that character on the page re-renders. No server, no export, no page reload.
 				</p>
 			</Hero>
 
 			{/* Demo */}
 			<section className="w-full max-w-2xl lg:max-w-5xl flex flex-col gap-4">
-				<h2 className="text-xs uppercase tracking-[0.18em] font-medium text-muted">Interactive demo — click any character</h2>
+				<h2 className="text-xs uppercase tracking-[0.18em] font-medium text-muted">Interactive demo — edit a letter, then switch the write path</h2>
 				<div className="rounded-xl -mx-8 px-8 py-8" style={{ background: "var(--panel)", overflow: "hidden" }}>
 					<Demo />
 				</div>
@@ -40,12 +40,14 @@ export default function Home() {
 				<h2 className="text-xs uppercase tracking-[0.18em] font-medium text-muted">How it works</h2>
 				<div className="prose-grid grid grid-cols-1 sm:grid-cols-2 gap-12 text-sm leading-relaxed">
 					<div className="flex flex-col gap-3">
-						<p className="font-semibold text-base">Parse, edit, regenerate</p>
-						<p>glyphShaper uses opentype.js to parse the uploaded font binary into a structured
-						object. Each glyph&rsquo;s <code className="text-xs font-mono">path.commands</code> array
-						— moveTo, lineTo, curveTo, quadraticCurveTo — is exposed as draggable SVG control
-						points. When you hit Apply, the modified font object is serialised back to an
-						ArrayBuffer via <code className="text-xs font-mono">font.toArrayBuffer()</code>.</p>
+						<p className="font-semibold text-base">Parse, edit, patch</p>
+						<p>glyphShaper uses opentype.js to read each glyph&rsquo;s outline as path commands —
+						moveTo, lineTo, quadraticCurveTo — and shows them as draggable control points. When you
+						apply an edit to a TrueType font, only that glyph is re-encoded into the{" "}
+						<code className="text-xs font-mono">glyf</code> table; GSUB, GPOS, the hinting programs
+						and the variation tables are copied from the original file untouched. Fonts with CFF
+						outlines are rebuilt with <code className="text-xs font-mono">font.toArrayBuffer()</code> instead,
+						which drops those tables; the demo above lets you compare the two.</p>
 					</div>
 					<div className="flex flex-col gap-3">
 						<p className="font-semibold text-base">Dynamic @font-face injection</p>
