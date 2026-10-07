@@ -88,7 +88,7 @@ type WriteReport = {
 type Shaping = {
 	/** Kerning between A and V in font units (0 = none) */
 	kernAV: number
-	/** True if "fi" sets narrower with ligatures on than off */
+	/** True if "fi" sets at a different width with ligatures on than off */
 	ligature: boolean
 	/** How much narrower kerning makes the kerning specimen line at 100 CSS px (optical sizing off), in px */
 	kernGain: number
@@ -118,7 +118,9 @@ async function measureShaping(family: string, unitsPerEm: number): Promise<Shapi
 		return el.getBoundingClientRect().width / zoom
 	}
 	const kernPx = w("AV") - w("A") - w("V")
-	const ligature = w("fi", "font-variant-ligatures:none") - w("fi") > 0.5
+	// A ligature is in use when "fi" sets at a different width with ligatures on than off. Either direction counts:
+	// after f is narrowed, the separate f and i can be narrower than the font's own fi glyph, which keeps its width.
+	const ligature = Math.abs(w("fi", "font-variant-ligatures:none") - w("fi")) > 0.5
 	const kernGain = Math.round(((w(SPEC_KERN, "font-kerning:none") - w(SPEC_KERN)) / PROBE_PX) * 1000) / 10
 	host.remove()
 	return { kernAV: Math.round((kernPx / PROBE_PX) * unitsPerEm), ligature, kernGain }

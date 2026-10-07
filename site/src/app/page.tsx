@@ -22,6 +22,8 @@ export default function Home() {
 					Click any character and reshape its outline. glyphShaper writes back only the glyph you
 					edited. The tables that hold the font&rsquo;s kerning, ligatures, hinting programs and
 					variable axes are copied untouched, so the rest of the font behaves as its designer made it.
+					Two limits: an edit that adds or removes a point stops that one glyph following a variable
+					font&rsquo;s axes, and fonts with CFF outlines are rebuilt whole.
 					The result loads as a dynamic <code className="text-xs font-mono">@font-face</code> override,
 					and every instance of that character on the page re-renders. No server, no export, no page reload.
 				</p>
@@ -47,7 +49,9 @@ export default function Home() {
 						<code className="text-xs font-mono">glyf</code> table; GSUB, GPOS, the hinting programs
 						and the variation tables are copied from the original file untouched. Fonts with CFF
 						outlines are rebuilt with <code className="text-xs font-mono">font.toArrayBuffer()</code> instead,
-						which drops those tables; the demo above lets you compare the two.</p>
+						which drops those tables; the demo above lets you compare the two. In a variable font, an
+						edit that adds or removes a point removes that glyph&rsquo;s own variation data (it keeps its
+						default shape at every axis setting); every other glyph still varies.</p>
 					</div>
 					<div className="flex flex-col gap-3">
 						<p className="font-semibold text-base">Dynamic @font-face injection</p>
