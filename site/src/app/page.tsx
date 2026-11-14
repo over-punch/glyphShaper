@@ -12,20 +12,20 @@ export default function Home() {
 
 			{/* Hero */}
 			<Hero
-				eyebrow="live glyph editing that leaves the rest alone"
-				title={[{ text: "Edit a glyph." }, { text: "Keep the font.", italic: true, subtle: true }]}
+				eyebrow="reshape a letter in real page text"
+				title={[{ text: "Edit a glyph." }, { text: "See it in context.", italic: true, subtle: true }]}
 				install="@overpunch/glyphshaper"
 				github="https://github.com/over-punch/glyphShaper"
-				tech={["TypeScript", "opentype.js", "React + Vanilla JS", "No server"]}
+				tech={["TypeScript", "opentype.js", "React + Vanilla JS", "Browser editing"]}
 			>
 				<p className="text-base leading-relaxed max-w-lg">
-					Click any character and reshape its outline. glyphShaper writes back only the glyph you
-					edited. The tables that hold the font&rsquo;s kerning, ligatures, hinting programs and
-					variable axes are copied untouched, so the rest of the font behaves as its designer made it.
-					Two limits: an edit that adds or removes a point stops that one glyph following a variable
-					font&rsquo;s axes, and fonts with CFF outlines are rebuilt whole.
-					The result loads as a dynamic <code className="text-xs font-mono">@font-face</code> override,
-					and every instance of that character on the page re-renders. No server, no export, no page reload.
+					Edit a character&rsquo;s outline and apply it to text using the same font family.
+					For patchable TrueType fonts, glyphShaper re-encodes edited glyphs and retains
+					the original shaping tables. Edited glyphs lose their own hinting instructions;
+					variation data survives only when the original point structure can be preserved.
+					Fonts that cannot be patched are rebuilt, losing kerning, ligatures, hinting and axes.
+					Compare the write paths below. Changes load through a temporary
+					<code className="text-xs font-mono"> @font-face</code> override, without a page reload.
 				</p>
 			</Hero>
 
@@ -47,10 +47,10 @@ export default function Home() {
 						moveTo, lineTo, quadraticCurveTo — and shows them as draggable control points. When you
 						apply an edit to a TrueType font, only that glyph is re-encoded into the{" "}
 						<code className="text-xs font-mono">glyf</code> table; GSUB, GPOS, the hinting programs
-						and the variation tables are copied from the original file untouched. Fonts with CFF
+						and compatible variation data are retained from the original file. The edited glyph loses its own hinting instructions; retained tables were designed for the original outlines. Fonts with CFF
 						outlines are rebuilt with <code className="text-xs font-mono">font.toArrayBuffer()</code> instead,
 						which drops those tables; the demo above lets you compare the two. In a variable font, an
-						edit that adds or removes a point removes that glyph&rsquo;s own variation data (it keeps its
+						edit whose original point structure cannot be preserved removes that glyph&rsquo;s own variation data (it keeps its
 						default shape at every axis setting); every other glyph still varies.</p>
 					</div>
 					<div className="flex flex-col gap-3">
@@ -115,7 +115,7 @@ const { font } = useGlyphFont(null)`} />
 						<CodeBlock code={`import {
   parseFont, getGlyphCommands, setGlyphCommands,
   fontToBlob, applyFontBlob,
-} from '@overpunch/glyphshaper'
+} from '@overpunch/glyphshaper/core'
 
 const res    = await fetch('/fonts/MyFont.ttf')
 const buffer = await res.arrayBuffer()
@@ -158,8 +158,8 @@ const url = applyFontBlob('MyFont', fontToBlob(font))
 									<td className="py-2">Write modified commands back into the font object (mutates in place).</td>
 								</tr>
 								<tr className="hover:bg-foreground/5 transition-colors">
-									<td className="py-2 pr-6 font-mono">fontToBlob(font)</td>
-									<td className="py-2">Serialise the font to a Blob (OTF binary).</td>
+									<td className="py-2 pr-6 font-mono">fontToBlob(font, options?)</td>
+									<td className="py-2">Write a Blob: TrueType for the patch path, OpenType/CFF for a whole-font rebuild.</td>
 								</tr>
 								<tr className="hover:bg-foreground/5 transition-colors">
 									<td className="py-2 pr-6 font-mono">applyFontBlob(family, blob, existingUrl?, options?)</td>
@@ -193,7 +193,7 @@ const url = applyFontBlob('MyFont', fontToBlob(font))
 						<p className="text-xs leading-relaxed">
 							glyphShaper accepts <strong>TTF, OTF, WOFF1, and WOFF2</strong>. WOFF2 support
 							requires passing a <code className="font-mono">woff2Decompressor</code> callback
-							to <code className="font-mono">parseFont()</code> — the demo uses{" "}
+							to <code className="font-mono">parseFont()</code> — this demo sends WOFF2 bytes to its same-origin server route, which uses{" "}
 							<code className="font-mono">wawoff2</code> (a WASM brotli decoder) for this.
 							The <code className="font-mono">useGlyphFont</code> hook does not accept a
 							decompressor and therefore does not support WOFF2; use{" "}

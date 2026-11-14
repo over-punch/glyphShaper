@@ -703,7 +703,7 @@ function WriteReportPanel({ report, original, written, untouchedDiff }: { report
 					{patch && report.dependents > 0 && <p>{report.dependents} other glyph{report.dependents > 1 ? "s are" : " is"} built from {report.glyphsRewritten > 1 ? "the edited glyphs" : "the edited glyph"} (accented letters such as ö from o). {report.dependents > 1 ? "They aren’t" : "It isn’t"} rewritten, but {report.dependents > 1 ? "they show" : "it shows"} the new shape and follow{report.dependents > 1 ? "" : "s"} its new width; accents stay where they were.</p>}
 					{patch && report.glyphsRewritten > 0 && <p>The kerning{report.axes ? ", ligatures and variation data" : " and ligatures"} that are kept were made for the original shape of what you edited: a much wider letter can crowd its neighbours.</p>}
 					{patch && report.glyphsRewritten > 0 && hinting.mark === "yes" && <p>The edited glyph loses its own hinting instructions; the font’s hinting programs and every other glyph’s instructions are as they were.</p>}
-					{patch && report.frozen > 0 && <p>Frozen: {report.frozen > 1 ? `${report.frozen} edited glyphs` : "one edited glyph"} no longer var{report.frozen > 1 ? "y" : "ies"}. The edit added or removed a point of the outline (or the glyph was assembled from other glyphs), so the font’s variation data for {report.frozen > 1 ? "those glyphs" : "that glyph"} no longer fits and was removed. {report.frozen > 1 ? "They keep" : "It keeps"} one shape at every weight; every other glyph still varies.</p>}
+					{patch && report.frozen > 0 && <p>Frozen: {report.frozen > 1 ? `${report.frozen} edited glyphs` : "one edited glyph"} no longer var{report.frozen > 1 ? "y" : "ies"}. The original point structure could not be preserved (for example, points changed or the glyph was assembled from other glyphs), so the font’s variation data for {report.frozen > 1 ? "those glyphs" : "that glyph"} no longer fits and was removed. {report.frozen > 1 ? "They keep" : "It keeps"} one shape at every weight; every other glyph still varies.</p>}
 				</div>
 			)}
 		</dl>
@@ -1070,6 +1070,8 @@ export default function Demo() {
 	return (
 		<div className="w-full">
 
+			<p className="text-xs text-muted mb-3">WOFF2 files are uploaded to this site for decompression. TTF, OTF and WOFF1 files are read in your browser. Only use fonts you are licensed to modify.</p>
+
 			{/* Font source: samples or an upload */}
 			<div
 				onDrop={e => { setIsDragOver(false); handleDrop(e) }}
@@ -1235,8 +1237,8 @@ export default function Demo() {
 			{!loading && (
 				<p className="text-xs text-muted italic mt-6" style={{ lineHeight: "1.8" }}>
 					{font
-						? "Click any letter to reshape it, then switch the write path. Kerning, the ligature and the untouched letter are measured in your browser after every write; the table lines compare the written file with the original, byte for byte. Limits of writing back one glyph: a ligature that is a glyph of its own (PT Serif’s fi) doesn’t pick up an edited f, though one assembled from the letter does; the kerning and the variation data that are kept are the original’s, made for the original shapes; and a font with CFF outlines can only be rebuilt."
-						: "PT Serif loads by default — swap it for Roboto Flex or any TTF, OTF, WOFF, or WOFF2 above."
+						? "Click any letter to reshape it, then switch the write path. Kerning, the ligature and the untouched letter are measured in your browser after every write; the table lines compare the written file with the original, byte for byte. These probes cover this specimen, not every shaping feature or axis setting. Limits of writing back one glyph: a ligature that is a glyph of its own (PT Serif’s fi) doesn’t pick up an edited f, though one assembled from the letter does; the kerning and the variation data that are kept are the original’s, made for the original shapes; and a font with CFF outlines can only be rebuilt. WOFF2 files are sent to this site’s server for decompression; use a TTF, OTF or WOFF1 file to avoid that upload."
+						: "PT Serif loads by default — try Roboto Flex or a supported font above."
 					}
 				</p>
 			)}

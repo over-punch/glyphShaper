@@ -153,9 +153,10 @@ describe('useGlyphFont', () => {
 
 	it('re-runs and loads again when URL changes', async () => {
 		stubFetch()
+		const initialProps: { url: string | null } = { url: null }
 		const { result, rerender } = renderHook(
 			({ url }: { url: string | null }) => useGlyphFont(url),
-			{ initialProps: { url: null } },
+			{ initialProps },
 		)
 		expect(result.current.font).toBeNull()
 		rerender({ url: '/fonts/test.ttf' })

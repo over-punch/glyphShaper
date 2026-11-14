@@ -2,11 +2,15 @@
 
 [![npm](https://img.shields.io/npm/v/%40overpunch%2Fglyphshaper.svg)](https://www.npmjs.com/package/@overpunch/glyphshaper) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![part of liiift type-tools](https://img.shields.io/badge/liiift-type--tools-blueviolet)](https://github.com/over-punch/type-tools)
 
-CSS and JavaScript have no native way to reshape individual glyph outlines after the font loads. `glyphShaper` parses the font binary in the browser, lets you drag bezier control points to edit any character's outline, then writes only that glyph back into the font (kerning, ligatures, hinting and variable axes stay as they were) and injects a `@font-face` override — every instance of that character on the page re-renders instantly, no page reload required.
+Edit a character’s outline and see the change in real page text. `glyphShaper` reads a font with opentype.js, exposes its Bézier points, and applies the edited font through a `@font-face` override. Use it for display lettering, headline experiments, or an editor of your own.
+
+For patchable TrueType fonts, the default writer re-encodes edited glyphs and retains the original shaping tables. The edited glyph loses its own hinting instructions; variation data is retained only when the edit preserves the original point structure. Fonts that cannot be patched use a whole-font rebuild, which loses kerning, ligatures, hinting and variable axes. See **What a write keeps** below before choosing a font or write mode.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/over-punch/glyphShaper/main/assets/editor.png?v=1" width="420" alt="The glyphShaper bezier editor open on the letter 'g': every anchor point (filled circles) and bezier handle (outlined circles) of the glyph outline is draggable, with Adjust/Path tabs and an 'Apply to page' button." />
 </p>
+
+*Screenshots show an earlier Inter-based demo layout; they illustrate the editor, not the current write-report results.*
 
 **[Try it live at glyphshaper.com →](https://glyphshaper.com)** · [npm](https://www.npmjs.com/package/@overpunch/glyphshaper) · [GitHub](https://github.com/over-punch/glyphShaper)
 
@@ -38,9 +42,9 @@ npm install wawoff2
 
 > **Font format:** `glyphShaper` accepts TTF, OTF, WOFF1, and — with the optional `wawoff2` dep and a supplied decompressor — WOFF2. The font must be loaded from a URL accessible to `fetch()` (or supplied as a `File` object via `<input type="file">`). **WOFF2 needs a decompressor:** `useGlyphFont` cannot take one, so it throws on WOFF2 input — for WOFF2, call `parseFont(buffer, woff2Decompressor)` directly (see [`parseFont`](#parsefontbuffer-woff2decompressor) below).
 
-> **Variable fonts:** opentype.js re-serialises only the static outline, not the `gvar`/`fvar`/`avar`/`STAT` tables. After `applyFontBlob()`, the overridden family is a **static snapshot** — the same outline at every weight, and CSS `font-variation-settings` no longer take effect for that family. `glyphShaper` logs a `console.warn` when it detects a variable font.
+> **Variable fonts:** the default patch path can retain variable axes and an edited glyph’s original variation data when its point structure is preserved. If that structure cannot be preserved, the writer removes that glyph’s `gvar` data; inspect `getWriteInfo(blob).frozenGlyphs`. A whole-font rebuild instead produces a **static snapshot** and logs a warning when it detects a variable font. Retained variation data was designed for the original shape; it does not guarantee a successful design at every axis setting.
 
-> **What a write keeps.** For fonts with TrueType outlines (`.ttf`, most `.woff` and `.woff2`), `fontToBlob()` re-encodes **only the glyphs you edited** and copies, byte-for-byte, the tables that hold the rest of the font's behaviour: `GSUB`, `GPOS` and `kern` (ligatures, kerning), `fpgm`, `prep` and `cvt ` (hinting), and `fvar`, `gvar`, `HVAR`, `avar` and `STAT` (variable axes). With no edits the blob is the original file. What changes: `glyf`, `loca`, `head` (it holds the whole-file checksum) and, when a width changes, the edited glyphs' `hmtx` entries; a `DSIG` signature is removed (it no longer matches), and `hdmx`/`LTSH` are removed if an advance width changed. The edited glyph loses its own TrueType instructions. Composite glyphs built from an edited glyph (ö from o) aren't rewritten: they show the new outline and follow its new advance width (`getWriteInfo(blob).dependentGlyphs`), with accents left where they were. A ligature that is a glyph of its own doesn't pick up an edit to its letters. The kerning and variation data that are kept were made for the original shapes. In a variable font, an edit that only moves points keeps the glyph varying; an edit that adds or removes points removes that one glyph's variation data (`getWriteInfo(blob).frozenGlyphs`), and it keeps one shape at every axis setting. A cubic curve (`C`) written into a TrueType glyph becomes four quadratic curves.
+> **What a write keeps.** For fonts with TrueType outlines (`.ttf`, most `.woff` and `.woff2`), `fontToBlob()` re-encodes **only the glyphs you edited** and copies, byte-for-byte, the tables that hold the rest of the font's behaviour: `GSUB`, `GPOS` and `kern` (ligatures, kerning), `fpgm`, `prep` and `cvt ` (hinting), and `fvar`, `HVAR`, `avar` and `STAT` (variable axes). The `gvar` table is also copied unless an edited glyph’s point structure cannot be preserved; in that case its variation data is cleared as described below. With no edits the patch path returns the retained sfnt bytes (WOFF input is first unpacked, so this is not the original compressed container). The writer rebuilds `glyf` and `loca`, updates `head` (including the whole-file checksum), and writes metrics and bounds in `hmtx`, `hhea` and `maxp` where needed; dependent composites can also receive updated advance widths; a `DSIG` signature is removed (it no longer matches), and `hdmx`/`LTSH` are removed if an advance width changed. The edited glyph loses its own TrueType instructions. Composite glyphs built from an edited glyph (ö from o) aren't rewritten: they show the new outline and follow its new advance width (`getWriteInfo(blob).dependentGlyphs`), with accents left where they were. A ligature that is a glyph of its own doesn't pick up an edit to its letters. The kerning and variation data that are kept were made for the original shapes. In a variable font, an edit that preserves the original point structure keeps the glyph’s variation data; when that structure cannot be preserved, the writer removes that one glyph's variation data (`getWriteInfo(blob).frozenGlyphs`), and it keeps one shape at every axis setting. A cubic curve (`C`) written into a TrueType glyph becomes four quadratic curves.
 >
 > **Fonts with CFF outlines** (most `.otf`) are still rebuilt with opentype.js, which can't write `GPOS`, `kern` or `GDEF` (and glyphShaper removes `GSUB` before a rebuild, because opentype.js throws on substitution lookups it can't write): the overridden family loses **kerning** and **ligatures** (rebuilt PT Serif sets "AVAVAV To Ty WA" at 874.3px instead of 804.5px at 100px in Chromium 149: its width with kerning off), hinting and variable axes, and composite glyphs are flattened. Pass `{ write: 'rebuild' }` to get this path on any font, or `{ write: 'patch' }` to throw instead of falling back.
 
@@ -77,27 +81,47 @@ Use `useGlyphFont` alone when you want to drive the lower-level functions direct
 
 ```tsx
 'use client'
-import { useGlyphFont, getGlyphCommands, setGlyphCommands, fontToBlob, applyFontBlob } from '@overpunch/glyphshaper'
+import { useEffect, useState } from 'react'
+import {
+  useGlyphFont, getGlyphCommands, setGlyphCommands,
+  fontToBlob, applyFontBlob, revokeFont,
+} from '@overpunch/glyphshaper'
 
 export default function MyEditor() {
   const { font, loading, error } = useGlyphFont('/fonts/MyFont.ttf')
+  const [applyError, setApplyError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!font) return
+    const original = getGlyphCommands(font, 'A')
+    const modified = original.map((cmd, i) =>
+      i === 0 && cmd.type === 'M' ? { ...cmd, x: cmd.x + 20 } : cmd
+    )
+    let url: string | undefined
+    setApplyError(null)
+    try {
+      setGlyphCommands(font, 'A', modified)
+      url = applyFontBlob('MyFont', fontToBlob(font))
+    } catch (cause) {
+      setApplyError(cause instanceof Error ? cause.message : 'Could not apply font')
+    }
+    return () => {
+      setGlyphCommands(font, 'A', original)
+      if (url) revokeFont(url)
+    }
+  }, [font])
 
   if (loading) return <p>Loading…</p>
-  if (error)   return <p>Error: {error}</p>
-  if (!font)   return null
-
-  const cmds = getGlyphCommands(font, 'A')
-  // … modify cmds …
-  setGlyphCommands(font, 'A', cmds)
-  const blob = fontToBlob(font)
-  applyFontBlob('MyFont', blob)
+  if (error || applyError) return <p>{error || applyError}</p>
+  if (!font) return null
+  return <p style={{ fontFamily: 'MyFont' }}>A headline with an edited A.</p>
 }
 ```
 
 ### Vanilla JS
 
 ```ts
-import { parseFont, getGlyphCommands, setGlyphCommands, fontToBlob, applyFontBlob } from '@overpunch/glyphshaper'
+import { parseFont, getGlyphCommands, setGlyphCommands, fontToBlob, applyFontBlob } from '@overpunch/glyphshaper/core'
 
 const res    = await fetch('/fonts/MyFont.ttf')
 const buffer = await res.arrayBuffer()
@@ -247,7 +271,7 @@ Lower-level React component that exposes only the SVG bezier editor. Use this wh
 
 ## Privacy & lifecycle
 
-- **Everything runs in the browser.** The font is parsed, edited, and re-serialised entirely client-side. `glyphShaper` makes no network calls and sends no telemetry — your font bytes never leave the page.
+- **Core editing runs in the browser.** Parsing, outline editing and font writing can run client-side. `useGlyphFont(url)` fetches the font; a supplied WOFF2 decompressor may use a server. The bundled website demo posts WOFF2 bytes to its same-origin `/api/decompress-woff2` route, so do not treat WOFF2 uploads there as local-only. The core writer does not send font bytes or telemetry.
 - **The override is ephemeral.** `applyFontBlob()` creates a same-origin `blob:` URL and a `<style>` tag that live only for the page session. Nothing is persisted; a reload restores the original font.
 - **Clean up to avoid leaks.** Each `applyFontBlob()` returns its Blob URL. Pass it back as `previousUrl` on the next call, or call `revokeFont(url)` when done — otherwise the Blob URL and its `<style>` tag are orphaned. `GlyphShaperEditor` manages this for you; if you drive the lower-level functions yourself, you own the cleanup.
 - **Licensing is your responsibility.** Reshaping and re-serialising a font may be restricted by its EULA. Only edit fonts you are licensed to modify.

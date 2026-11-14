@@ -1,7 +1,7 @@
 {
 	"name": "@overpunch/glyphshaper",
-	"version": "1.2.0",
-	"description": "Interactive glyph path editor — click any character, reshape its bezier curves, and watch every instance on the page update instantly",
+	"version": "1.2.1",
+	"description": "Browser glyph-outline editing with patch-aware font writing and a React editor",
 	"type": "module",
 	"main": "dist/index.cjs",
 	"types": "dist/index.d.ts",
